@@ -1,9 +1,9 @@
 CC = gcc
 ##### using -fPIC slows things down by a few percent, not a big deal
-CFLAGS = -O3 -fPIC -fomit-frame-pointer -funroll-loops -m64 -pedantic -std=gnu11
-LDFLAGS =
-INCLUDES = -I/usr/local/include
-LIBS = -L/usr/local/lib -lgmp -lm
+CFLAGS ?= -O3 -fPIC -fomit-frame-pointer -funroll-loops -pedantic -std=gnu11
+LDFLAGS ?=
+INCLUDES ?= -I/usr/local/include
+LIBS ?= -L/usr/local/lib -lgmp -lm
 INSTALL_ROOT = /usr/local
 
 MPZFFTHEADERS = zzcrt.h zzmem.h zzmisc.h mpzfft_moduli.h mpnfft.h mpnfft_mod.h fermat.h split.h reduce.h split_reduce.h crt.h recompose.h crt_recompose.h  fft62/arith128.h fft62/mod62.h fft62/fft62.h
@@ -13,13 +13,24 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
+TEST_PROGRAMS = test_rforest_fixtures
+FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
+FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
+KAPPA_FIXTURES = \
+	tests/fixtures/aws/p41_g1_d4_001_factorial_i0.rf \
+	tests/fixtures/aws/p41_g1_d4_001_block_i0.rf \
+	tests/fixtures/aws/p41_g3_d8_001_block_i1.rf \
+	tests/fixtures/aws/p41_g8_d18_001_block_i0.rf
 
 all: librforest.a $(PROGRAMS)
+
+.PHONY: all clean install test check
 
 clean:
 	rm -f *.o
 	rm -f fft62/*.o
-	rm -f librforest.a $(PROGRAMS)
+	rm -f tests/*.o
+	rm -f librforest.a $(PROGRAMS) $(TEST_PROGRAMS)
 
 install: all
 	cp -v rforest.h $(INSTALL_ROOT)/include
@@ -35,6 +46,20 @@ librforest.a: $(OBJECTS)
 
 test_rforest: test_rforest.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+test_rforest_fixtures: tests/test_rforest_fixtures.o librforest.a rforest.h
+	$(CC) $(LDFLAGS) $(FIXTURE_LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
+test: test_rforest_fixtures
+	./test_rforest_fixtures $(FIXTURES)
+	./test_rforest_fixtures --kappa 0 $(KAPPA_FIXTURES)
+	./test_rforest_fixtures --kappa 4 $(KAPPA_FIXTURES)
+	./test_rforest_fixtures --disable-fft $(FIXTURES)
+
+check: test
 
 ##### hwlpoly modules
 
