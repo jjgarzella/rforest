@@ -26,6 +26,14 @@ CAPTURED_CALLS = {
     ("p41_g8_d18_001", "block_i0"),
 }
 CALL_NAMES = ["block_i0", "block_i1", "factorial_i0", "factorial_i1"]
+FFT_CAPTURE_BOUND = int(os.environ.get("FFT_CAPTURE_BOUND", "0"))
+FFT_CAPTURE_KAPPA = int(os.environ.get("FFT_CAPTURE_KAPPA", "0"))
+FFT_CAPTURE_CASE = os.environ.get("FFT_CAPTURE_CASE", "p41_g1_d4_001")
+FFT_CAPTURE_ONLY = False
+
+
+class FFTFixtureCaptured(Exception):
+    pass
 
 
 def git_revision(path):
@@ -101,6 +109,13 @@ def sequential_remainder_forest(M, m, k, kbase=0, indices=None, V=None, ans=None
     dim = M.nrows()
     if M.ncols() != dim:
         raise RuntimeError("AWS call supplied a non-square matrix")
+
+    # Let the original AWS computation advance from the i=0 block call to its
+    # actual i=1 block call. The dummy result is discarded by this capture.
+    if FFT_CAPTURE_ONLY and call_name == "block_i0":
+        identity = identity_matrix(ZZ, dim)
+        return {index: identity for index in indices}
+
     rows = dim if V is None else V.nrows()
     deg = max(
         [0]
@@ -114,9 +129,10 @@ def sequential_remainder_forest(M, m, k, kbase=0, indices=None, V=None, ans=None
     moduli = [int(m(index) if callable(m) else m[index]) for index in indices]
     endpoints = [int(k(index) if callable(k) else k[index]) for index in indices]
     if kappa is None:
-        effective_kappa = 1 if len(indices) <= 1 else int(ceil(log(log(len(indices), 2), 2)) + 1)
+        aws_default_kappa = 1 if len(indices) <= 1 else int(ceil(log(log(len(indices), 2), 2)) + 1)
     else:
-        effective_kappa = int(kappa)
+        aws_default_kappa = int(kappa)
+    effective_kappa = FFT_CAPTURE_KAPPA if FFT_CAPTURE_ONLY else aws_default_kappa
 
     matrix_coefficients = []
     for i in range(dim):
@@ -131,21 +147,45 @@ def sequential_remainder_forest(M, m, k, kbase=0, indices=None, V=None, ans=None
 
     result = {}
     outputs = []
-    for index, modulus, endpoint in zip(indices, moduli, endpoints):
-        ring = Integers(modulus)
-        accumulator = matrix(ring, rows, dim, initial_v)
-        for argument in range(int(kbase), endpoint):
+    if FFT_CAPTURE_ONLY:
+        # One exact integer recurrence supplies every endpoint. Reducing its
+        # complete matrix at each p^2 is equivalent to independent sequential
+        # multiplication modulo p^2, while avoiding repeated Sage products.
+        endpoint_records = {}
+        for index, modulus, endpoint in zip(indices, moduli, endpoints):
+            endpoint_records.setdefault(endpoint, []).append((index, modulus))
+        accumulator = matrix(ZZ, rows, dim, initial_v)
+        for argument in range(int(kbase), max(endpoints)):
             evaluated_entries = []
             for i in range(dim):
                 for j in range(dim):
                     entry = M[i, j]
                     value = entry if entry in ZZ else entry(argument)
-                    evaluated_entries.append(int(value) % modulus)
-            evaluated_matrix = matrix(ring, dim, dim, evaluated_entries)
-            accumulator *= evaluated_matrix
-        output = [int(value) % modulus for value in accumulator.list()]
-        result[index] = matrix(ZZ, rows, dim, output)
-        outputs.append({"index": int(index), "modulus": modulus, "endpoint": endpoint, "values": output})
+                    evaluated_entries.append(ZZ(value))
+            accumulator = accumulator * matrix(ZZ, dim, dim, evaluated_entries)
+            for index, modulus in endpoint_records.get(argument + 1, []):
+                output = [int(value % modulus) for value in accumulator.list()]
+                result[index] = matrix(ZZ, rows, dim, output)
+                outputs.append({"index": int(index), "modulus": modulus,
+                                "endpoint": argument + 1, "values": output})
+        outputs.sort(key=lambda output: output["index"])
+    else:
+        for index, modulus, endpoint in zip(indices, moduli, endpoints):
+            ring = Integers(modulus)
+            accumulator = matrix(ring, rows, dim, initial_v)
+            for argument in range(int(kbase), endpoint):
+                evaluated_entries = []
+                for i in range(dim):
+                    for j in range(dim):
+                        entry = M[i, j]
+                        value = entry if entry in ZZ else entry(argument)
+                        evaluated_entries.append(int(value) % modulus)
+                evaluated_matrix = matrix(ring, dim, dim, evaluated_entries)
+                accumulator *= evaluated_matrix
+            output = [int(value) % modulus for value in accumulator.list()]
+            result[index] = matrix(ZZ, rows, dim, output)
+            outputs.append({"index": int(index), "modulus": modulus,
+                            "endpoint": endpoint, "values": output})
 
     capture_records.append(
         {
@@ -156,6 +196,8 @@ def sequential_remainder_forest(M, m, k, kbase=0, indices=None, V=None, ans=None
             "deg": deg,
             "kbase": int(kbase),
             "kappa": effective_kappa,
+            "aws_default_kappa": aws_default_kappa,
+            "expect_fft_matrix_mul": int(FFT_CAPTURE_ONLY),
             "initial_z": _product(moduli),
             "moduli": moduli,
             "endpoints": endpoints,
@@ -164,6 +206,9 @@ def sequential_remainder_forest(M, m, k, kbase=0, indices=None, V=None, ans=None
             "outputs": outputs,
         }
     )
+
+    if FFT_CAPTURE_ONLY:
+        raise FFTFixtureCaptured()
 
     if ans is not None:
         for index in indices:
@@ -187,10 +232,10 @@ sys.modules["pyrforest"] = capture_module
 load("tests/test_avg_poly_pyrforest_p41.sage")
 
 
-def write_fixture(record):
+def write_fixture(record, fixture_name=None):
     case_id = record["case_id"]
     call_name = record["call_name"]
-    fixture_name = case_id + "_" + call_name + ".rf"
+    fixture_name = fixture_name or case_id + "_" + call_name + ".rf"
     path = os.path.join(fixture_dir, fixture_name)
     with open(path, "w", encoding="ascii") as fixture:
         fixture.write("RFOREST_FIXTURE 1\n")
@@ -206,6 +251,8 @@ def write_fixture(record):
         fixture.write("N {}\n".format(len(record["moduli"])))
         fixture.write("KBASE {}\n".format(record["kbase"]))
         fixture.write("KAPPA {}\n".format(record["kappa"]))
+        fixture.write("AWS_DEFAULT_KAPPA {}\n".format(record["aws_default_kappa"]))
+        fixture.write("EXPECT_FFT_MATRIX_MUL {}\n".format(record["expect_fft_matrix_mul"]))
         fixture.write("INITIAL_Z {}\n".format(record["initial_z"]))
         fixture.write("MODULI\n")
         for output, modulus, endpoint in zip(
@@ -264,3 +311,37 @@ if written != CAPTURED_CALLS:
 print("validated {} selected AWS p=41 L-polynomial comparisons".format(len(CASE_IDS)))
 print("captured {} fixture calls with independent sequential modular products".format(len(written)))
 print("capture and comparison runtime: {:.3f}s".format(time.perf_counter() - started))
+
+if FFT_CAPTURE_BOUND:
+    if FFT_CAPTURE_BOUND <= 41 or FFT_CAPTURE_KAPPA < 0:
+        raise RuntimeError("FFT_CAPTURE_BOUND must exceed 41 and FFT_CAPTURE_KAPPA must be nonnegative")
+
+    case = load_case_by_id(EVEN_CASE_FILE, FFT_CAPTURE_CASE)
+    active_case_id = FFT_CAPTURE_CASE
+    active_call_index = 0
+    FFT_CAPTURE_ONLY = True
+    capture_started = time.perf_counter()
+    try:
+        compute_A_f_avg_poly_from_curve(case.curve, FFT_CAPTURE_BOUND)
+    except FFTFixtureCaptured:
+        pass
+    else:
+        raise RuntimeError("AWS computation did not reach the selected block_i1 call")
+    finally:
+        FFT_CAPTURE_ONLY = False
+
+    if active_call_index != 2 or not capture_records:
+        raise RuntimeError("expected to capture exactly the AWS block_i1 call")
+    fft_record = capture_records[-1]
+    if fft_record["call_name"] != "block_i1":
+        raise RuntimeError("captured call was not the AWS i=1 block matrix")
+    fixture_name = "{}_bound{}_kappa{}_block_i1.rf".format(
+        FFT_CAPTURE_CASE, FFT_CAPTURE_BOUND, FFT_CAPTURE_KAPPA
+    )
+    write_fixture(fft_record, fixture_name)
+    print("captured expanded AWS i=1 block with bound={}, kappa={}, {} matrices".format(
+        FFT_CAPTURE_BOUND, FFT_CAPTURE_KAPPA, len(fft_record["moduli"])
+    ))
+    print("expanded capture and independent reference runtime: {:.3f}s".format(
+        time.perf_counter() - capture_started
+    ))

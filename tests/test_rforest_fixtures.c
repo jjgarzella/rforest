@@ -9,8 +9,21 @@
 #include <gmp.h>
 
 #include "rforest.h"
+#include "hwmpz.h"
 
 #define MAX_FIXTURE_CELLS 1000000U
+
+static unsigned long fft_matrix_multiply_calls;
+
+mpz_t *__real_mpz_rmatrix_mult_fft(mpz_t *C, mpz_t *A, int r, mpz_t *B,
+                                   int d, mpz_t w);
+
+mpz_t *__wrap_mpz_rmatrix_mult_fft(mpz_t *C, mpz_t *A, int r, mpz_t *B,
+                                   int d, mpz_t w)
+{
+    fft_matrix_multiply_calls++;
+    return __real_mpz_rmatrix_mult_fft(C, A, r, B, d, w);
+}
 
 typedef struct {
     FILE *file;
@@ -30,6 +43,8 @@ typedef struct {
     long n;
     long kbase;
     int kappa;
+    int aws_default_kappa;
+    int expect_fft_matrix_mul;
     size_t matrix_cells;
     size_t input_cells;
     size_t coefficient_cells;
@@ -268,10 +283,16 @@ static void fixture_read(const char *path, fixture *data)
     read_labeled_long(&reader, "N", &data->n, "N");
     read_labeled_long(&reader, "KBASE", &data->kbase, "KBASE");
     read_labeled_int(&reader, "KAPPA", &data->kappa, "KAPPA");
+    read_labeled_int(&reader, "AWS_DEFAULT_KAPPA", &data->aws_default_kappa,
+                     "AWS wrapper default KAPPA");
+    read_labeled_int(&reader, "EXPECT_FFT_MATRIX_MUL", &data->expect_fft_matrix_mul,
+                     "FFT matrix multiplication expectation");
 
     if (data->dim <= 0 || data->rows <= 0 || data->deg < 0 ||
-        data->n <= 0 || data->kappa < 0)
+        data->n <= 0 || data->kappa < 0 || data->aws_default_kappa < 0)
         reader_error(&reader, "DIM/ROWS/N must be positive and DEG/KAPPA must be nonnegative");
+    if (data->expect_fft_matrix_mul != 0 && data->expect_fft_matrix_mul != 1)
+        reader_error(&reader, "EXPECT_FFT_MATRIX_MUL must be zero or one");
 
     n = data->n;
     if ((unsigned long)n > MAX_FIXTURE_CELLS)
@@ -465,6 +486,8 @@ static void check_fixture(const char *path, const fixture *data)
     mpz_t actual_residue;
     size_t i;
     size_t j;
+    unsigned long fft_calls_before = fft_matrix_multiply_calls;
+    unsigned long fft_calls;
 
     mpz_init_set(working_z, data->initial_z);
     mpz_init_set(expected_z, data->initial_z);
@@ -482,6 +505,14 @@ static void check_fixture(const char *path, const fixture *data)
     rforest(outputs, working_v, data->rows, data->matrix, data->deg, data->dim,
             data->moduli, data->kbase, data->endpoints, data->n,
             working_z, data->kappa);
+    fft_calls = fft_matrix_multiply_calls - fft_calls_before;
+
+    if (data->expect_fft_matrix_mul && fft_calls == 0) {
+        fprintf(stderr,
+                "%s (%s): expected natural mpz_rmatrix_mult_fft dispatch, observed none\n",
+                path, data->case_name);
+        exit(EXIT_FAILURE);
+    }
 
     for (i = 0; i < (size_t)data->n; i++) {
         for (j = 0; j < data->input_cells; j++) {
@@ -517,8 +548,9 @@ static void check_fixture(const char *path, const fixture *data)
         }
     }
 
-    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d\n",
-           path, data->case_name, data->call_name, data->n, data->dim, data->rows);
+    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d, FFT matrix multiplies=%lu\n",
+           path, data->case_name, data->call_name, data->n, data->dim, data->rows,
+           fft_calls);
 
     mpz_clear(working_z);
     mpz_clear(expected_z);

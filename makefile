@@ -14,6 +14,7 @@ HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
 TEST_PROGRAMS = test_rforest_fixtures
+FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
 
 all: librforest.a $(PROGRAMS)
@@ -42,7 +43,7 @@ test_rforest: test_rforest.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
 test_rforest_fixtures: tests/test_rforest_fixtures.o librforest.a rforest.h
-	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+	$(CC) $(LDFLAGS) $(FIXTURE_LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
 tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
