@@ -13,13 +13,18 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
+TEST_PROGRAMS = test_rforest_fixtures
+FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
 
 all: librforest.a $(PROGRAMS)
+
+.PHONY: all clean install test check
 
 clean:
 	rm -f *.o
 	rm -f fft62/*.o
-	rm -f librforest.a $(PROGRAMS)
+	rm -f tests/*.o
+	rm -f librforest.a $(PROGRAMS) $(TEST_PROGRAMS)
 
 install: all
 	cp -v rforest.h $(INSTALL_ROOT)/include
@@ -35,6 +40,17 @@ librforest.a: $(OBJECTS)
 
 test_rforest: test_rforest.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+test_rforest_fixtures: tests/test_rforest_fixtures.o librforest.a rforest.h
+	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
+test: test_rforest_fixtures
+	./test_rforest_fixtures $(FIXTURES)
+
+check: test
 
 ##### hwlpoly modules
 
