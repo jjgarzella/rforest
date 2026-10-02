@@ -1,9 +1,9 @@
 CC = gcc
 ##### using -fPIC slows things down by a few percent, not a big deal
-CFLAGS = -O3 -fPIC -fomit-frame-pointer -funroll-loops -m64 -pedantic -std=gnu11
-LDFLAGS =
-INCLUDES = -I/usr/local/include
-LIBS = -L/usr/local/lib -lgmp -lm
+CFLAGS ?= -O3 -fPIC -fomit-frame-pointer -funroll-loops -pedantic -std=gnu11
+LDFLAGS ?=
+INCLUDES ?= -I/usr/local/include
+LIBS ?= -L/usr/local/lib -lgmp -lm
 INSTALL_ROOT = /usr/local
 
 MPZFFTHEADERS = zzcrt.h zzmem.h zzmisc.h mpzfft_moduli.h mpnfft.h mpnfft_mod.h fermat.h split.h reduce.h split_reduce.h crt.h recompose.h crt_recompose.h  fft62/arith128.h fft62/mod62.h fft62/fft62.h
