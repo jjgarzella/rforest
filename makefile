@@ -16,6 +16,11 @@ PROGRAMS = test_rforest
 TEST_PROGRAMS = test_rforest_fixtures
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
+KAPPA_FIXTURES = \
+	tests/fixtures/aws/p41_g1_d4_001_factorial_i0.rf \
+	tests/fixtures/aws/p41_g1_d4_001_block_i0.rf \
+	tests/fixtures/aws/p41_g3_d8_001_block_i1.rf \
+	tests/fixtures/aws/p41_g8_d18_001_block_i0.rf
 
 all: librforest.a $(PROGRAMS)
 
@@ -50,6 +55,9 @@ tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
 
 test: test_rforest_fixtures
 	./test_rforest_fixtures $(FIXTURES)
+	./test_rforest_fixtures --kappa 0 $(KAPPA_FIXTURES)
+	./test_rforest_fixtures --kappa 4 $(KAPPA_FIXTURES)
+	./test_rforest_fixtures --disable-fft $(FIXTURES)
 
 check: test
 

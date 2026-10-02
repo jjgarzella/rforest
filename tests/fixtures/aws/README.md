@@ -89,8 +89,38 @@ and one dispatch at bound 2683 (388 matrices). The native test executable uses
 the GNU linker `--wrap` option to count calls to `mpz_rmatrix_mult_fft` only,
 so FFT reduction cannot satisfy the assertion. The wrapper is test-only and
 does not add a public library API or alter production crossover thresholds.
-The measured clean `make test` build and run took 5.58 seconds; replay alone
-took about 0.09 seconds.
+
+## Normal suite variants
+
+`make test` and `make check` both run the five fixtures with their recorded
+`kappa` values, replay the four p=41 fixtures again with `kappa=0` and `kappa=4`,
+and replay all five fixtures with `hw_disable_fft` enabled. For the p=41 cases,
+`kappa=0` selects a tree of height 4 and `kappa=4` selects the sequential
+regime (tree height 0). These variants use the same captured inputs and
+expected matrices. Each fixture is replayed twice from fresh `V` and `z`
+values; each run checks every canonical output residue, final `z`, final `V`,
+and that the shared matrix, moduli, and endpoints remain unchanged.
+
+The ordinary recorded-kappa pass requires the confirmed FFT fixture to reach
+`mpz_rmatrix_mult_fft` once per replay. The FFT-disabled pass skips that
+positive expectation and verifies that the wrapper observed zero matrix FFT
+calls, while still checking the same full expected matrices and final state.
+All five cases, including the confirmed FFT case, run in this normal command.
+The clean build and complete suite took 5.72 seconds; after the build, the
+complete suite took 0.39 seconds:
+
+```sh
+make clean
+/usr/bin/time -p make test
+/usr/bin/time -p make test
+```
+
+The first timed run reported `real 5.72`, `user 4.34`, `sys 0.91`; the second
+reported `real 0.39`, `user 0.27`, `sys 0.09`. It compared 436 output matrices
+in each recorded-kappa and FFT-disabled pass, plus 48 outputs for each of the
+two kappa variants, with every case run twice. In the normal pass the expanded
+fixture observed one matrix FFT multiply per replay; in the disabled pass it
+observed zero.
 
 To reproduce, clone the suite at the pinned commit and point the runner at a
 read-only AWS-2026 checkout at its pinned commit:

@@ -12,6 +12,7 @@
 #include "hwmpz.h"
 
 #define MAX_FIXTURE_CELLS 1000000U
+#define FIXTURE_REPEAT_RUNS 2
 
 static unsigned long fft_matrix_multiply_calls;
 
@@ -476,22 +477,48 @@ static void expected_final_v(const fixture *data, const mpz_t final_z,
     clear_mpz_array(evaluated, data->matrix_cells);
 }
 
-static void check_fixture(const char *path, const fixture *data)
+static int mpz_arrays_equal(mpz_t *left, mpz_t *right, size_t count)
 {
-    mpz_t *outputs = new_mpz_array(NULL, data->output_cells, "rforest outputs");
-    mpz_t *working_v = copy_mpz_array(data->initial_v, data->input_cells);
+    size_t i;
+    for (i = 0; i < count; i++)
+        if (mpz_cmp(left[i], right[i]) != 0)
+            return 0;
+    return 1;
+}
+
+static int tree_height(long n, int kappa)
+{
+    int bits = 0;
+    while (n > 0) {
+        bits++;
+        n >>= 1;
+    }
+    return bits > kappa ? bits - kappa : 0;
+}
+
+static void check_fixture(const char *path, const fixture *data, int kappa,
+                          int disable_fft, int enforce_fft_expectation)
+{
+    mpz_t *matrix_snapshot = copy_mpz_array(data->matrix, data->coefficient_cells);
+    mpz_t *moduli_snapshot = copy_mpz_array(data->moduli, (size_t)data->n);
+    long *endpoints_snapshot = malloc((size_t)data->n * sizeof(*endpoints_snapshot));
     mpz_t *reference_v = new_mpz_array(NULL, data->input_cells, "reference final V");
     mpz_t working_z;
     mpz_t expected_z;
-    mpz_t actual_residue;
     size_t i;
     size_t j;
-    unsigned long fft_calls_before = fft_matrix_multiply_calls;
-    unsigned long fft_calls;
+    int repeat;
+    unsigned long fft_calls_per_run = 0;
+    int previous_hw_disable_fft = hw_disable_fft;
 
-    mpz_init_set(working_z, data->initial_z);
+    if (!endpoints_snapshot) {
+        fprintf(stderr, "fixture runner: out of memory copying endpoints\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(endpoints_snapshot, data->endpoints,
+           (size_t)data->n * sizeof(*endpoints_snapshot));
+
     mpz_init_set(expected_z, data->initial_z);
-    mpz_init(actual_residue);
     for (i = 0; i < (size_t)data->n; i++) {
         if (!mpz_divisible_p(expected_z, data->moduli[i])) {
             fprintf(stderr, "%s (%s): INITIAL_Z is not divisible by modulus %zu\n",
@@ -502,79 +529,173 @@ static void check_fixture(const char *path, const fixture *data)
     }
     expected_final_v(data, expected_z, reference_v);
 
-    rforest(outputs, working_v, data->rows, data->matrix, data->deg, data->dim,
-            data->moduli, data->kbase, data->endpoints, data->n,
-            working_z, data->kappa);
-    fft_calls = fft_matrix_multiply_calls - fft_calls_before;
+    hw_disable_fft = disable_fft;
+    for (repeat = 0; repeat < FIXTURE_REPEAT_RUNS; repeat++) {
+        mpz_t *outputs = new_mpz_array(NULL, data->output_cells, "rforest outputs");
+        mpz_t *working_v = copy_mpz_array(data->initial_v, data->input_cells);
+        unsigned long fft_calls_before = fft_matrix_multiply_calls;
+        unsigned long fft_calls;
 
-    if (data->expect_fft_matrix_mul && fft_calls == 0) {
-        fprintf(stderr,
-                "%s (%s): expected natural mpz_rmatrix_mult_fft dispatch, observed none\n",
-                path, data->case_name);
-        exit(EXIT_FAILURE);
-    }
+        mpz_init_set(working_z, data->initial_z);
+        rforest(outputs, working_v, data->rows, data->matrix, data->deg, data->dim,
+                data->moduli, data->kbase, data->endpoints, data->n,
+                working_z, kappa);
+        fft_calls = fft_matrix_multiply_calls - fft_calls_before;
 
-    for (i = 0; i < (size_t)data->n; i++) {
+        if (repeat == 0)
+            fft_calls_per_run = fft_calls;
+        else if (fft_calls != fft_calls_per_run) {
+            fprintf(stderr, "%s (%s): repeat %d changed FFT matrix multiply count from %lu to %lu\n",
+                    path, data->case_name, repeat + 1, fft_calls_per_run, fft_calls);
+            exit(EXIT_FAILURE);
+        }
+
+        if (enforce_fft_expectation && data->expect_fft_matrix_mul && fft_calls == 0) {
+            fprintf(stderr,
+                    "%s (%s): expected natural mpz_rmatrix_mult_fft dispatch, observed none\n",
+                    path, data->case_name);
+            exit(EXIT_FAILURE);
+        }
+        if (disable_fft && fft_calls != 0) {
+            fprintf(stderr,
+                    "%s (%s): hw_disable_fft set but observed %lu matrix FFT multiplies\n",
+                    path, data->case_name, fft_calls);
+            exit(EXIT_FAILURE);
+        }
+
+        for (i = 0; i < (size_t)data->n; i++) {
+            for (j = 0; j < data->input_cells; j++) {
+                size_t offset = i * data->input_cells + j;
+                size_t row = j / (size_t)data->dim;
+                size_t col = j % (size_t)data->dim;
+                if (mpz_sgn(outputs[offset]) < 0 ||
+                    mpz_cmp(outputs[offset], data->moduli[i]) >= 0) {
+                    fprintf(stderr, "%s (%s, %s): output at modulus[%zu] is not a canonical residue\n",
+                            path, data->case_name, data->call_name, i);
+                    exit(EXIT_FAILURE);
+                }
+                if (mpz_cmp(outputs[offset], data->expected[offset]) != 0) {
+                    fprintf(stderr, "%s (%s, %s): output mismatch at modulus[%zu] ",
+                            path, data->case_name, data->call_name, i);
+                    gmp_fprintf(stderr, "prime %ld (mod %Zd), matrix coordinate (%zu,%zu): expected %Zd, got %Zd\n",
+                                data->primes[i], data->moduli[i], row, col,
+                                data->expected[offset], outputs[offset]);
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+
+        if (mpz_cmp(working_z, expected_z) != 0) {
+            fprintf(stderr, "%s (%s): final z mismatch: expected ", path, data->case_name);
+            gmp_fprintf(stderr, "%Zd, got %Zd\n", expected_z, working_z);
+            exit(EXIT_FAILURE);
+        }
         for (j = 0; j < data->input_cells; j++) {
-            size_t offset = i * data->input_cells + j;
             size_t row = j / (size_t)data->dim;
             size_t col = j % (size_t)data->dim;
-            mpz_mod(actual_residue, outputs[offset], data->moduli[i]);
-            if (mpz_cmp(actual_residue, data->expected[offset]) != 0) {
-                fprintf(stderr, "%s (%s, %s): output mismatch at modulus[%zu] ",
-                        path, data->case_name, data->call_name, i);
-                gmp_fprintf(stderr, "prime %ld (mod %Zd), matrix coordinate (%zu,%zu): expected %Zd, got %Zd\n",
-                            data->primes[i], data->moduli[i], row, col,
-                            data->expected[offset], actual_residue);
+            if (mpz_cmp(working_v[j], reference_v[j]) != 0) {
+                fprintf(stderr, "%s (%s): final V mismatch at coordinate (%zu,%zu): expected ",
+                        path, data->case_name, row, col);
+                gmp_fprintf(stderr, "%Zd, got %Zd with final z %Zd\n",
+                            reference_v[j], working_v[j], expected_z);
                 exit(EXIT_FAILURE);
             }
         }
-    }
 
-    if (mpz_cmp(working_z, expected_z) != 0) {
-        fprintf(stderr, "%s (%s): final z mismatch: expected ", path, data->case_name);
-        gmp_fprintf(stderr, "%Zd, got %Zd\n", expected_z, working_z);
-        exit(EXIT_FAILURE);
-    }
-    for (j = 0; j < data->input_cells; j++) {
-        size_t row = j / (size_t)data->dim;
-        size_t col = j % (size_t)data->dim;
-        if (mpz_cmp(working_v[j], reference_v[j]) != 0) {
-            fprintf(stderr, "%s (%s): final V mismatch at coordinate (%zu,%zu): expected ",
-                    path, data->case_name, row, col);
-            gmp_fprintf(stderr, "%Zd, got %Zd with final z %Zd\n",
-                        reference_v[j], working_v[j], expected_z);
+        if (!mpz_arrays_equal(data->matrix, matrix_snapshot, data->coefficient_cells) ||
+            !mpz_arrays_equal(data->moduli, moduli_snapshot, (size_t)data->n) ||
+            memcmp(data->endpoints, endpoints_snapshot,
+                   (size_t)data->n * sizeof(*endpoints_snapshot)) != 0) {
+            fprintf(stderr, "%s (%s): rforest mutated reusable fixture inputs\n",
+                    path, data->case_name);
             exit(EXIT_FAILURE);
         }
+
+        mpz_clear(working_z);
+        clear_mpz_array(outputs, data->output_cells);
+        clear_mpz_array(working_v, data->input_cells);
     }
 
-    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d, FFT matrix multiplies=%lu\n",
-           path, data->case_name, data->call_name, data->n, data->dim, data->rows,
-           fft_calls);
-
-    mpz_clear(working_z);
+    hw_disable_fft = previous_hw_disable_fft;
     mpz_clear(expected_z);
-    mpz_clear(actual_residue);
-    clear_mpz_array(outputs, data->output_cells);
-    clear_mpz_array(working_v, data->input_cells);
     clear_mpz_array(reference_v, data->input_cells);
+    clear_mpz_array(matrix_snapshot, data->coefficient_cells);
+    clear_mpz_array(moduli_snapshot, (size_t)data->n);
+    free(endpoints_snapshot);
+
+    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d, kappa=%d, tree height=%d, repeats=%d, FFT matrix multiplies/run=%lu%s\n",
+           path, data->case_name, data->call_name, data->n, data->dim, data->rows,
+           kappa, tree_height(data->n, kappa), FIXTURE_REPEAT_RUNS,
+           fft_calls_per_run, disable_fft ? " (FFT disabled)" : "");
+}
+
+static int parse_kappa(const char *text)
+{
+    char *end = NULL;
+    long value;
+
+    errno = 0;
+    value = strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' || value < 0 || value > INT_MAX) {
+        fprintf(stderr, "fixture runner: invalid nonnegative kappa '%s'\n", text);
+        exit(EXIT_FAILURE);
+    }
+    return (int)value;
 }
 
 int main(int argc, char **argv)
 {
     int arg;
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s fixture.rf [fixture.rf ...]\n", argv[0]);
+    int have_fixture = 0;
+    int disable_fft = 0;
+    int kappa_override_set = 0;
+    int kappa_override = 0;
+    int fixture_count = 0;
+
+    for (arg = 1; arg < argc; arg++) {
+        if (strcmp(argv[arg], "--disable-fft") == 0) {
+            disable_fft = 1;
+        } else if (strcmp(argv[arg], "--kappa") == 0) {
+            if (++arg >= argc) {
+                fprintf(stderr, "fixture runner: --kappa requires a value\n");
+                return EXIT_FAILURE;
+            }
+            if (kappa_override_set) {
+                fprintf(stderr, "fixture runner: --kappa may be specified only once\n");
+                return EXIT_FAILURE;
+            }
+            kappa_override = parse_kappa(argv[arg]);
+            kappa_override_set = 1;
+        } else if (argv[arg][0] == '-') {
+            fprintf(stderr, "fixture runner: unknown option '%s'\n", argv[arg]);
+            return EXIT_FAILURE;
+        } else {
+            have_fixture = 1;
+        }
+    }
+
+    if (!have_fixture) {
+        fprintf(stderr, "usage: %s [--disable-fft] [--kappa K] fixture.rf [fixture.rf ...]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     for (arg = 1; arg < argc; arg++) {
         fixture data;
+        int kappa;
+        if (strcmp(argv[arg], "--disable-fft") == 0)
+            continue;
+        if (strcmp(argv[arg], "--kappa") == 0) {
+            arg++;
+            continue;
+        }
         fixture_read(argv[arg], &data);
-        check_fixture(argv[arg], &data);
+        kappa = kappa_override_set ? kappa_override : data.kappa;
+        check_fixture(argv[arg], &data, kappa, disable_fft,
+                      !disable_fft && !kappa_override_set);
         fixture_clear(&data);
+        fixture_count++;
     }
 
-    printf("PASS all %d native rforest fixture(s)\n", argc - 1);
+    printf("PASS all %d native rforest fixture(s)\n", fixture_count);
     return EXIT_SUCCESS;
 }
