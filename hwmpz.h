@@ -176,6 +176,11 @@ mpz_t *mpz_rmatrix_mult_fft (mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t w
 static inline mpz_t *mpz_row_matrix_mult_fft (mpz_t *C, mpz_t *A, mpz_t *B, int d, mpz_t w) { return mpz_rmatrix_mult_fft (C, A, 1, B, d, w); }
 static inline mpz_t *mpz_matrix_mult_fft (mpz_t *C, mpz_t *A, mpz_t *B, int d, mpz_t w) { return mpz_rmatrix_mult_fft (C, A, d, B, d, w); }
 
+// Computes C=(A0+A1*P)(B0+B1*P) in Z[P]/(P^2), where each coefficient
+// plane is row-major (A0, A1, B0, B1, C0, C1). C cannot overlap A or B.
+// Fourier dispatch reuses one transform per input entry across all products.
+mpz_t *mpz_rmatrix_mult_p2 (mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t w);
+
 // computes C=AB mod m, where A and C are r-by-d matrices and B, is a d-by-d matrices, using naive rd^2 alg, w is a work variable (helps to avoid reallocs during computation)
 // ALIASING NOT ALLOWED
 static inline void mpz_rmatrix_mult_mod_naive (mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t m, mpz_t w)
