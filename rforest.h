@@ -32,6 +32,33 @@ void rforest (mpz_t *A,   // array of size rows*dim*n (outputs)
               mpz_t z,    // integer divisible by product of the moduli
               int kappa); // log_2 of number of trees in the forest
 
+/*
+ * Ring forests use the same endpoint, modulus, and state contract as
+ * rforest. The transition polynomial variable x is independent of P and Q.
+ *
+ * M is entry-major: [matrix row][matrix column][ring coefficient][x degree],
+ * with x coefficients in ascending degree order. V and A are
+ * coefficient-major, row-major matrices. Thus P^n uses [P exponent][row]
+ * [column], while P^N,Q^N uses [P exponent][Q exponent][row][column].
+ * Bivariate truncation is by a box: a term is discarded when either
+ * exponent reaches N. Each endpoint output coefficient is reduced modulo
+ * its integer modulus. On return, z has the consumed moduli divided out and
+ * V contains the full product modulo the remaining z. Inputs M, m, and k
+ * are not modified.
+ * The caller owns and initializes all arrays; A and V are mutated outputs
+ * and must not overlap any input or each other. Only the fixed rings exposed
+ * by these facades are supported. Positive dimensions and ring parameters
+ * are required, and internal tree sizes are checked before allocation.
+ */
+void rforest_p2 (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
+                 mpz_t *m, long kbase, long *k, long n, mpz_t z, int kappa);
+void rforest_pn (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
+                 int nP, mpz_t *m, long kbase, long *k, long n, mpz_t z,
+                 int kappa);
+void rforest_pnq (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
+                  int N, mpz_t *m, long kbase, long *k, long n, mpz_t z,
+                  int kappa);
+
 // computes z = prod_i=0^(n-1) m[i] using a product tree
 void mproduct (mpz_t z, mpz_t *m, long n);
 

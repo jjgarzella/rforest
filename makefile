@@ -13,8 +13,8 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
-TEST_PROGRAMS = test_rforest_fixtures test_ring_matmul test_ring_forest_disabled
-BENCH_PROGRAMS = bench_ring_baselines
+TEST_PROGRAMS = test_rforest_fixtures test_ring_matmul test_ring_forest
+BENCH_PROGRAMS = bench_ring_baselines bench_ring_forest
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
 KAPPA_FIXTURES = \
@@ -54,18 +54,24 @@ test_rforest_fixtures: tests/test_rforest_fixtures.o librforest.a rforest.h
 test_ring_matmul: tests/test_ring_matmul.o librforest.a
 	$(CC) $(LDFLAGS) -Wl,--wrap=mpzfft_fft -Wl,--wrap=mpzfft_ifft -Wl,--wrap=zz_mpnfft_poly_matrix_mul -o $@ $< librforest.a $(LIBS)
 
-test_ring_forest_disabled: tests/test_ring_forest_disabled.o librforest.a
+test_ring_forest: tests/test_ring_forest.o librforest.a
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
 bench_ring_baselines: tests/bench_ring_baselines.o librforest.a hwmpz.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
-.PHONY: bench-ring bench-ring-pnq
+bench_ring_forest: tests/bench_ring_forest.o librforest.a rforest.h
+	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+.PHONY: bench-ring bench-ring-pnq bench-ring-forest
 bench-ring: bench_ring_baselines
 	./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt
 
 bench-ring-pnq: bench_ring_baselines
 	./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt --pnq-optimized
+
+bench-ring-forest: bench_ring_forest
+	./bench_ring_forest
 
 tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
@@ -73,19 +79,22 @@ tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
 tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
+tests/bench_ring_forest.o: tests/bench_ring_forest.c rforest.h hwmpz.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
 tests/test_ring_matmul.o: tests/test_ring_matmul.c
 	$(CC) $(CFLAGS) -DRFOREST_ENABLE_P2_MATMUL_TESTS -DRFOREST_ENABLE_PN_MATMUL_TESTS -DRFOREST_ENABLE_RING_MATMUL_TESTS $(INCLUDES) -I. -o $@ -c $<
 
-tests/test_ring_forest_disabled.o: tests/test_ring_forest_disabled.c
+tests/test_ring_forest.o: tests/test_ring_forest.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
-test: test_rforest_fixtures test_ring_matmul test_ring_forest_disabled
+test: test_rforest_fixtures test_ring_matmul test_ring_forest
 	./test_rforest_fixtures $(FIXTURES)
 	./test_rforest_fixtures --kappa 0 $(KAPPA_FIXTURES)
 	./test_rforest_fixtures --kappa 4 $(KAPPA_FIXTURES)
 	./test_rforest_fixtures --disable-fft $(FIXTURES)
 	./test_ring_matmul
-	./test_ring_forest_disabled
+	./test_ring_forest
 
 check: test
 

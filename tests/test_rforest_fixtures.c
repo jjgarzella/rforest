@@ -629,6 +629,195 @@ static void check_fixture(const char *path, const fixture *data, int kappa,
            fft_calls_per_run, disable_fft ? " (FFT disabled)" : "");
 }
 
+/* Replay each captured AWS block forest through its P^2 regular form. */
+static void check_p2_block_fixture(const char *path, fixture *data, int kappa)
+{
+    int block_dim = data->dim;
+    int dim;
+    size_t rows;
+    size_t degree_count;
+    size_t ring_cells;
+    size_t ring_vector_cells;
+    size_t block_vector_cells;
+    size_t ring_matrix_count;
+    size_t ring_output_count;
+    mpz_t *ring_M;
+    mpz_t *ring_V;
+    mpz_t *ring_A;
+    mpz_t *block_V;
+    mpz_t *block_A;
+    mpz_t *matrix_snapshot;
+    mpz_t *moduli_snapshot;
+    long *endpoints_snapshot;
+    mpz_t ring_z;
+    mpz_t block_z;
+
+    if (block_dim <= 0 || block_dim % 2 || data->rows != block_dim) {
+        fprintf(stderr, "%s: P^2 block fixture must be an even square matrix\n", path);
+        exit(EXIT_FAILURE);
+    }
+    dim = block_dim / 2;
+    rows = (size_t)dim;
+    degree_count = (size_t)data->deg + 1;
+    ring_cells = (size_t)dim * (size_t)dim;
+    ring_vector_cells = 2 * ring_cells;
+    block_vector_cells = (size_t)data->rows * (size_t)block_dim;
+    ring_matrix_count = 2 * ring_cells * degree_count;
+    ring_output_count = (size_t)data->n * ring_vector_cells;
+
+    ring_M = new_mpz_array(NULL, ring_matrix_count, "P^2 fixture matrix");
+    ring_V = new_mpz_array(NULL, ring_vector_cells, "P^2 fixture initial V");
+    ring_A = new_mpz_array(NULL, ring_output_count, "P^2 fixture outputs");
+    block_V = copy_mpz_array(data->initial_v, data->input_cells);
+    block_A = new_mpz_array(NULL, data->output_cells, "block fixture outputs");
+    matrix_snapshot = copy_mpz_array(data->matrix, data->coefficient_cells);
+    moduli_snapshot = copy_mpz_array(data->moduli, (size_t)data->n);
+    endpoints_snapshot = malloc((size_t)data->n * sizeof(*endpoints_snapshot));
+    if (!endpoints_snapshot) {
+        fprintf(stderr, "%s: cannot allocate endpoint snapshot\n", path);
+        exit(EXIT_FAILURE);
+    }
+    memcpy(endpoints_snapshot, data->endpoints,
+           (size_t)data->n * sizeof(*endpoints_snapshot));
+
+    /* Convert [[M0,M1],[0,M0]] into entry-major P^2 coefficient planes. */
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            size_t ring_entry = (size_t)row * (size_t)dim + (size_t)col;
+            size_t block_entries[4] = {
+                (size_t)row * (size_t)block_dim + (size_t)col,
+                (size_t)row * (size_t)block_dim + (size_t)(dim + col),
+                (size_t)(dim + row) * (size_t)block_dim + (size_t)col,
+                (size_t)(dim + row) * (size_t)block_dim + (size_t)(dim + col)
+            };
+            for (size_t degree = 0; degree < degree_count; degree++) {
+                mpz_t *m0 = data->matrix + block_entries[0] * degree_count + degree;
+                mpz_t *m1 = data->matrix + block_entries[1] * degree_count + degree;
+                mpz_t *lower_left = data->matrix + block_entries[2] * degree_count + degree;
+                mpz_t *lower_right = data->matrix + block_entries[3] * degree_count + degree;
+                size_t ring_offset = ring_entry * 2 * degree_count;
+                if (mpz_sgn(*lower_left) != 0 || mpz_cmp(*m0, *lower_right) != 0) {
+                    fprintf(stderr,
+                            "%s: AWS transition matrix is not a P^2 block embedding\n",
+                            path);
+                    exit(EXIT_FAILURE);
+                }
+                mpz_set(ring_M[ring_offset + degree], *m0);
+                mpz_set(ring_M[ring_offset + degree_count + degree], *m1);
+            }
+        }
+    }
+
+    /* V is represented by its top block row; verify the full regular form. */
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            size_t ring_entry = (size_t)row * (size_t)dim + (size_t)col;
+            size_t upper_left = (size_t)row * (size_t)block_dim + (size_t)col;
+            size_t upper_right = upper_left + (size_t)dim;
+            size_t lower_left = (size_t)(dim + row) * (size_t)block_dim + (size_t)col;
+            size_t lower_right = lower_left + (size_t)dim;
+            if (mpz_sgn(data->initial_v[lower_left]) != 0 ||
+                mpz_cmp(data->initial_v[upper_left], data->initial_v[lower_right]) != 0) {
+                fprintf(stderr, "%s: AWS initial V is not a P^2 block embedding\n", path);
+                exit(EXIT_FAILURE);
+            }
+            mpz_set(ring_V[ring_entry], data->initial_v[upper_left]);
+            mpz_set(ring_V[ring_cells + ring_entry], data->initial_v[upper_right]);
+        }
+    }
+
+    mpz_init_set(ring_z, data->initial_z);
+    mpz_init_set(block_z, data->initial_z);
+    rforest_p2(ring_A, ring_V, (int)rows, ring_M, data->deg, dim,
+               data->moduli, data->kbase, data->endpoints, data->n,
+               ring_z, kappa);
+    rforest(block_A, block_V, data->rows, data->matrix, data->deg,
+            block_dim, data->moduli, data->kbase, data->endpoints,
+            data->n, block_z, kappa);
+
+    for (size_t endpoint = 0; endpoint < (size_t)data->n; endpoint++) {
+        mpz_t *ring_coeff0 = ring_A + endpoint * ring_vector_cells;
+        mpz_t *ring_coeff1 = ring_coeff0 + ring_cells;
+        mpz_t *block = block_A + endpoint * block_vector_cells;
+        for (int row = 0; row < block_dim; row++) {
+            for (int col = 0; col < block_dim; col++) {
+                size_t offset = (size_t)row * (size_t)block_dim + (size_t)col;
+                mpz_t *actual;
+                if (row < dim && col < dim)
+                    actual = ring_coeff0 + (size_t)row * (size_t)dim + (size_t)col;
+                else if (row < dim)
+                    actual = ring_coeff1 + (size_t)row * (size_t)dim +
+                             (size_t)(col - dim);
+                else if (col < dim)
+                    actual = NULL;
+                else
+                    actual = ring_coeff0 + (size_t)(row - dim) * (size_t)dim +
+                             (size_t)(col - dim);
+                if (actual) {
+                    if (mpz_cmp(block[offset], *actual) != 0 ||
+                        mpz_cmp(data->expected[endpoint * block_vector_cells + offset],
+                                *actual) != 0) {
+                        fprintf(stderr,
+                                "%s: P^2 ring output differs from AWS block result at endpoint %zu, cell %zu\n",
+                                path, endpoint, offset);
+                        exit(EXIT_FAILURE);
+                    }
+                } else if (mpz_sgn(block[offset]) != 0 ||
+                           mpz_sgn(data->expected[endpoint * block_vector_cells + offset]) != 0) {
+                    fprintf(stderr,
+                            "%s: P^2 ring output has nonzero lower-left AWS block at endpoint %zu\n",
+                            path, endpoint);
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+    }
+
+    for (int row = 0; row < block_dim; row++) {
+        for (int col = 0; col < block_dim; col++) {
+            size_t offset = (size_t)row * (size_t)block_dim + (size_t)col;
+            mpz_t *actual;
+            if (row < dim && col < dim)
+                actual = ring_V + (size_t)row * (size_t)dim + (size_t)col;
+            else if (row < dim)
+                actual = ring_V + ring_cells + (size_t)row * (size_t)dim +
+                         (size_t)(col - dim);
+            else if (col < dim)
+                actual = NULL;
+            else
+                actual = ring_V + (size_t)(row - dim) * (size_t)dim +
+                         (size_t)(col - dim);
+            if (actual ? mpz_cmp(block_V[offset], *actual) != 0
+                       : mpz_sgn(block_V[offset]) != 0) {
+                fprintf(stderr, "%s: P^2 final V differs from AWS block state at cell %zu\n",
+                        path, offset);
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    if (mpz_cmp(ring_z, block_z) != 0 ||
+        !mpz_arrays_equal(data->matrix, matrix_snapshot, data->coefficient_cells) ||
+        !mpz_arrays_equal(data->moduli, moduli_snapshot, (size_t)data->n) ||
+        memcmp(data->endpoints, endpoints_snapshot,
+               (size_t)data->n * sizeof(*endpoints_snapshot)) != 0) {
+        fprintf(stderr, "%s: P^2 forest changed final z or immutable inputs\n", path);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("PASS %s: P^2 output and final state match full AWS block forest (kappa=%d)\n",
+           path, kappa);
+    mpz_clear(ring_z);
+    mpz_clear(block_z);
+    clear_mpz_array(ring_M, ring_matrix_count);
+    clear_mpz_array(ring_V, ring_vector_cells);
+    clear_mpz_array(ring_A, ring_output_count);
+    clear_mpz_array(block_V, data->input_cells);
+    clear_mpz_array(block_A, data->output_cells);
+    clear_mpz_array(matrix_snapshot, data->coefficient_cells);
+    clear_mpz_array(moduli_snapshot, (size_t)data->n);
+    free(endpoints_snapshot);
+}
+
 static int parse_kappa(const char *text)
 {
     char *end = NULL;
@@ -692,6 +881,9 @@ int main(int argc, char **argv)
         kappa = kappa_override_set ? kappa_override : data.kappa;
         check_fixture(argv[arg], &data, kappa, disable_fft,
                       !disable_fft && !kappa_override_set);
+        if (!disable_fft && !kappa_override_set &&
+            strstr(data.call_name, "block") != NULL)
+            check_p2_block_fixture(argv[arg], &data, kappa);
         fixture_clear(&data);
         fixture_count++;
     }
