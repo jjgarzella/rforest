@@ -1,0 +1,346 @@
+#include <stdio.h>
+
+#ifndef RFOREST_ENABLE_RING_MATMUL_TESTS
+
+int main(void)
+{
+    puts("DISABLED ring matrix tests: activate with ring matmul PRs 2-4");
+    return 0;
+}
+
+#else
+
+#include <stdlib.h>
+#include <string.h>
+
+#include <gmp.h>
+
+#include "hwmpz.h"
+
+/* Proposed coefficient-major API; see ring_api_proposal.md. */
+void mpz_rmatrix_mult_p2(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t w);
+void mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
+                         int n, mpz_t w);
+void mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
+                          int N, mpz_t w);
+
+enum { FIXTURE_LIMIT = 100000 };
+
+static mpz_t *new_values(size_t count)
+{
+    mpz_t *values = malloc(count * sizeof(*values));
+    if (!values && count)
+        abort();
+    for (size_t i = 0; i < count; i++)
+        mpz_init(values[i]);
+    return values;
+}
+
+static void clear_values(mpz_t *values, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+        mpz_clear(values[i]);
+    free(values);
+}
+
+static size_t ring_coeff_count(int n, int nq)
+{
+    return (size_t)n * (size_t)nq;
+}
+
+static size_t cells(int rows, int dim)
+{
+    return (size_t)rows * (size_t)dim;
+}
+
+static void fill_matrix(mpz_t *values, size_t count, int mode, unsigned seed)
+{
+    for (size_t i = 0; i < count; i++) {
+        long value = (long)((i * 7 + seed * 3) % 19) - 9;
+        if (mode == 1 && i % 5 != 0)
+            value = 0; /* sparse */
+        if (mode == 2)
+            value = 0; /* zero */
+        mpz_set_si(values[i], value);
+        if (mode == 3 && value)
+            mpz_mul_2exp(values[i], values[i], 2048); /* large signed operands */
+    }
+}
+
+static void reference_product(mpz_t *C, const mpz_t *A, const mpz_t *B,
+                              int rows, int dim, int np, int nq, int bivariate)
+{
+    const size_t acells = cells(rows, dim);
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    mpz_t product;
+    mpz_init(product);
+    for (size_t i = 0; i < (size_t)np * (size_t)nq * acells; i++)
+        mpz_set_ui(C[i], 0);
+
+    for (int ap = 0; ap < np; ap++) {
+        for (int aq = 0; aq < nq; aq++) {
+            size_t ai = (size_t)ap * (size_t)nq + (size_t)aq;
+            for (int bp = 0; bp < np; bp++) {
+                for (int bq = 0; bq < nq; bq++) {
+                    int cp = ap + bp;
+                    int cq = aq + bq;
+                    size_t bi, ci;
+                    if (cp >= np || cq >= nq)
+                        continue; /* box truncation: discard either overflow */
+                    bi = (size_t)bp * (size_t)nq + (size_t)bq;
+                    ci = (size_t)cp * (size_t)nq + (size_t)cq;
+                    for (int row = 0; row < rows; row++) {
+                        for (int col = 0; col < dim; col++) {
+                            size_t out = ci * acells + (size_t)row * dim + col;
+                            for (int inner = 0; inner < dim; inner++) {
+                                size_t left = ai * acells + (size_t)row * dim + inner;
+                                size_t right = bi * bcells + (size_t)inner * dim + col;
+                                mpz_mul(product, A[left], B[right]);
+                                mpz_add(C[out], C[out], product);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    mpz_clear(product);
+    (void)bivariate;
+}
+
+static int equal_values(const mpz_t *left, const mpz_t *right, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+        if (mpz_cmp(left[i], right[i]) != 0)
+            return 0;
+    return 1;
+}
+
+static void run_case(const char *name, int np, int nq, int rows, int dim,
+                     int mode, int bivariate)
+{
+    const size_t coeffs = ring_coeff_count(np, nq);
+    const size_t acells = cells(rows, dim);
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    const size_t left_count = coeffs * acells;
+    const size_t right_count = coeffs * bcells;
+    const size_t output_count = coeffs * acells;
+    mpz_t *A = new_values(left_count);
+    mpz_t *B = new_values(right_count);
+    mpz_t *C = new_values(output_count);
+    mpz_t *expected = new_values(output_count);
+    mpz_t work;
+
+    fill_matrix(A, left_count, mode, 2);
+    fill_matrix(B, right_count, mode, 7);
+    mpz_init(work);
+    reference_product(expected, A, B, rows, dim, np, nq, bivariate);
+    if (bivariate)
+        mpz_rmatrix_mult_pnq(C, A, rows, B, dim, np, work);
+    else if (np == 2)
+        mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
+    else
+        mpz_rmatrix_mult_pn(C, A, rows, B, dim, np, work);
+    if (!equal_values(C, expected, output_count)) {
+        fprintf(stderr, "%s: ring product differs from direct GMP reference\n", name);
+        abort();
+    }
+    mpz_clear(work);
+    clear_values(A, left_count);
+    clear_values(B, right_count);
+    clear_values(C, output_count);
+    clear_values(expected, output_count);
+}
+
+static void expect_token(FILE *input, const char *expected)
+{
+    char token[256];
+    if (fscanf(input, "%255s", token) != 1 || strcmp(token, expected) != 0) {
+        fprintf(stderr, "AWS ring fixture: expected %s\n", expected);
+        abort();
+    }
+}
+
+static void read_values(FILE *input, mpz_t *values, size_t count)
+{
+    char token[4096];
+    for (size_t i = 0; i < count; i++) {
+        if (fscanf(input, "%4095s", token) != 1 || mpz_set_str(values[i], token, 10))
+            abort();
+    }
+}
+
+static void test_aws_products(const char *path)
+{
+    FILE *input = fopen(path, "r");
+    char token[256];
+    size_t case_count;
+    if (!input) {
+        perror(path);
+        abort();
+    }
+    expect_token(input, "AWS_RING_P2_PRODUCTS");
+    if (fscanf(input, "%255s", token) != 1 || strcmp(token, "1") != 0)
+        abort();
+    expect_token(input, "AWS_COMMIT");
+    if (fscanf(input, "%255s", token) != 1 ||
+        strcmp(token, "a1fc50dd667d262b5d83d1d4ceb1499bdbead288") != 0)
+        abort();
+    expect_token(input, "ZETA_SUITE_COMMIT");
+    if (fscanf(input, "%255s", token) != 1 ||
+        strcmp(token, "621107b12200a3c234c2e3dd6a4ba9dc87be9bea") != 0)
+        abort();
+    expect_token(input, "AWS_SOURCE");
+    if (fscanf(input, "%255s %255s", token, token) != 2)
+        abort();
+    expect_token(input, "GENERIC_UNIVARIATE_SOURCE");
+    if (fscanf(input, "%255s", token) != 1)
+        abort();
+    expect_token(input, "P8_GENERIC_REFERENCE_CHECKS");
+    if (fscanf(input, "%255s", token) != 1)
+        abort();
+    expect_token(input, "CASE_COUNT");
+    if (fscanf(input, "%zu", &case_count) != 1 || case_count > FIXTURE_LIMIT)
+        abort();
+
+    for (size_t test = 0; test < case_count; test++) {
+        int dim;
+        size_t count;
+        mpz_t *A, *B, *C, *expected;
+        mpz_t work;
+        expect_token(input, "CASE");
+        if (fscanf(input, "%255s %d", token, &dim) != 2 || dim <= 0)
+            abort();
+        count = (size_t)dim * (size_t)dim;
+        A = new_values(2 * count);
+        B = new_values(2 * count);
+        C = new_values(2 * count);
+        expected = new_values(2 * count);
+        for (int k = 0; k < 2; k++) {
+            expect_token(input, k == 0 ? "A0" : "A1");
+            read_values(input, A + (size_t)k * count, count);
+        }
+        for (int k = 0; k < 2; k++) {
+            expect_token(input, k == 0 ? "B0" : "B1");
+            read_values(input, B + (size_t)k * count, count);
+        }
+        for (int k = 0; k < 2; k++) {
+            expect_token(input, k == 0 ? "C0" : "C1");
+            read_values(input, expected + (size_t)k * count, count);
+        }
+        expect_token(input, "END_CASE");
+        mpz_init(work);
+        mpz_rmatrix_mult_p2(C, A, dim, B, dim, work);
+        if (!equal_values(C, expected, 2 * count)) {
+            fprintf(stderr, "AWS P^2 exact product mismatch: %s\n", token);
+            abort();
+        }
+        mpz_clear(work);
+        clear_values(A, 2 * count);
+        clear_values(B, 2 * count);
+        clear_values(C, 2 * count);
+        clear_values(expected, 2 * count);
+    }
+    fclose(input);
+}
+
+static void test_p2_order_and_cancellation(void)
+{
+    mpz_t *A = new_values(8);
+    mpz_t *B = new_values(8);
+    mpz_t *AB = new_values(8);
+    mpz_t *BA = new_values(8);
+    mpz_t work;
+
+    /* A0 and B0 do not commute; the P coefficient also checks product order. */
+    mpz_set_si(A[0], 1); mpz_set_si(A[1], 1);
+    mpz_set_si(A[2], 0); mpz_set_si(A[3], 1);
+    mpz_set_si(B[0], 1); mpz_set_si(B[1], 0);
+    mpz_set_si(B[2], 1); mpz_set_si(B[3], 1);
+    mpz_set_si(A[4], 0); mpz_set_si(A[5], 1);
+    mpz_set_si(A[6], 1); mpz_set_si(A[7], 0);
+    mpz_set_si(B[4], 1); mpz_set_si(B[5], 1);
+    mpz_set_si(B[6], 0); mpz_set_si(B[7], 1);
+    mpz_init(work);
+    mpz_rmatrix_mult_p2(AB, A, 2, B, 2, work);
+    mpz_rmatrix_mult_p2(BA, B, 2, A, 2, work);
+    if (equal_values(AB, BA, 8)) {
+        fputs("P^2 product lost matrix order\n", stderr);
+        abort();
+    }
+
+    /* (I + I*P)(I - I*P) has an exactly cancelling P coefficient. */
+    for (size_t i = 0; i < 8; i++) {
+        mpz_set_ui(A[i], 0);
+        mpz_set_ui(B[i], 0);
+    }
+    mpz_set_ui(A[0], 1); mpz_set_ui(A[3], 1);
+    mpz_set_ui(A[4], 1); mpz_set_ui(A[7], 1);
+    mpz_set_ui(B[0], 1); mpz_set_ui(B[3], 1);
+    mpz_set_ui(B[4], 1); mpz_set_ui(B[7], 1);
+    mpz_neg(B[4], B[4]); mpz_neg(B[7], B[7]);
+    mpz_rmatrix_mult_p2(AB, A, 2, B, 2, work);
+    for (size_t i = 4; i < 8; i++)
+        if (mpz_sgn(AB[i]) != 0) {
+            fputs("P^2 cancellation coefficient was nonzero\n", stderr);
+            abort();
+        }
+    mpz_clear(work);
+    clear_values(A, 8);
+    clear_values(B, 8);
+    clear_values(AB, 8);
+    clear_values(BA, 8);
+}
+
+static void test_bivariate_box_corner(void)
+{
+    mpz_t *A = new_values(9);
+    mpz_t *B = new_values(9);
+    mpz_t *C = new_values(9);
+    mpz_t *expected = new_values(9);
+    mpz_t work;
+    /* Scalar 1x1 matrices make the two discarded overflow terms explicit. */
+    mpz_set_ui(A[8], 2);  /* P^2 Q^2 */
+    mpz_set_ui(B[0], 3);  /* 1 */
+    mpz_set_ui(A[6], 5);  /* P^2 */
+    mpz_set_ui(B[3], 7);  /* P: P^3 overflows */
+    mpz_set_ui(A[2], 11); /* Q^2 */
+    mpz_set_ui(B[1], 13); /* Q: Q^3 overflows */
+    mpz_init(work);
+    reference_product(expected, A, B, 1, 1, 3, 3, 1);
+    mpz_rmatrix_mult_pnq(C, A, 1, B, 1, 3, work);
+    if (!equal_values(C, expected, 9) || mpz_cmp_ui(C[8], 6) != 0) {
+        fputs("bivariate box truncation dropped the highest corner or kept overflow\n",
+              stderr);
+        abort();
+    }
+    mpz_clear(work);
+    clear_values(A, 9);
+    clear_values(B, 9);
+    clear_values(C, 9);
+    clear_values(expected, 9);
+}
+
+int main(int argc, char **argv)
+{
+    const char *aws_fixture = argc > 1 ? argv[1]
+        : "tests/fixtures/aws_ring/p2_aws_products.txt";
+    test_aws_products(aws_fixture);
+    /* Base matrix API forbids C overlapping A or B; this ring API keeps that contract. */
+    run_case("p2-signed-dense-rectangular", 2, 1, 2, 3, 0, 0);
+    run_case("p2-sparse", 2, 1, 1, 4, 1, 0);
+    run_case("p2-zero", 2, 1, 2, 3, 2, 0);
+    run_case("p2-large", 2, 1, 2, 3, 3, 0);
+    run_case("pn-one-is-integer-matmul", 1, 1, 2, 3, 0, 0);
+    run_case("pn-three", 3, 1, 2, 3, 0, 0);
+    run_case("pn-five-cancellation-shapes", 5, 1, 2, 3, 1, 0);
+    run_case("pnq-one", 1, 1, 2, 3, 0, 1);
+    run_case("pnq-two", 2, 2, 2, 3, 1, 1);
+    run_case("pnq-three-box-and-high-corner", 3, 3, 2, 3, 0, 1);
+    test_p2_order_and_cancellation();
+    test_bivariate_box_corner();
+    puts("PASS ring matrix API exact references");
+    return 0;
+}
+
+#endif
