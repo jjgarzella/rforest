@@ -78,3 +78,29 @@ than integer block embedding. These are pre-optimization reference
 measurements, not claims about a future ring FFT implementation. Future PRs
 must compare each identical input case against both baselines and investigate
 any measurable slowdown; wall-clock values are not normal test gates.
+
+## P² implementation comparison
+
+Reproduce the stage-2 comparison with:
+
+```sh
+make clean bench_ring_baselines
+./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt \
+  --p2-optimized > tests/fixtures/aws_ring/p2_optimized_results.csv
+```
+
+This mode uses the same three AWS fixtures and the same 16 synthetic P² cases,
+fixed inputs, two warmups, and nine timed repetitions as the initial baseline
+run. It checks the native P² result against the direct GMP reference on every
+case, then reports per-case medians, MADs, and native-to-baseline ratios for
+both the adapter and integer block embedding. A ratio below 1 means the native
+P² operation was faster. The recorded stage-2 run has no per-case median
+regression against either baseline: native/adapter ratios range from 0.445 to
+0.970, and native/block ratios range from 0.165 to 0.640. The closest adapter
+case is the dense 8x8, 512-bit grid input at 0.970; its 2.29 microsecond median
+advantage exceeds the measured MADs (0.46 microseconds native, 0.29 adapter).
+The CSV retains all case-level timing variability. The separate native test
+also verifies that ordinary dispatch observes one forward transform per input
+coefficient entry, three Fourier matrix products, and one inverse transform
+per output coefficient entry, and that `hw_disable_fft` takes the exact
+classical fallback.
