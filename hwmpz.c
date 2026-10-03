@@ -674,3 +674,223 @@ mpz_t *mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B,
     mpz_rmatrix_mult_pn_classical(C, A, r, B, d, n, acells, bcells, w);
     return C;
 }
+
+static void mpz_rmatrix_pnq_sizes(int r, int d, int N,
+                                  size_t *acells, size_t *bcells,
+                                  size_t *coefficients, size_t *left_count,
+                                  size_t *right_count, size_t *terms)
+{
+    if (r <= 0 || d <= 0 || N <= 0 ||
+        !mpz_rmatrix_size_mul((size_t)r, (size_t)d, acells) ||
+        !mpz_rmatrix_size_mul((size_t)d, (size_t)d, bcells) ||
+        *acells > INT_MAX || *bcells > INT_MAX ||
+        !mpz_rmatrix_size_mul((size_t)N, (size_t)N, coefficients) ||
+        !mpz_rmatrix_size_mul(*coefficients, *acells, left_count) ||
+        !mpz_rmatrix_size_mul(*coefficients, *bcells, right_count) ||
+        !mpz_rmatrix_size_mul(*coefficients, (size_t)d, terms) ||
+        *left_count > SIZE_MAX / sizeof(mpz_t) ||
+        *right_count > SIZE_MAX / sizeof(mpz_t))
+        mpz_rmatrix_bad_dimensions();
+}
+
+static int mpz_rmatrix_pnq_use_fft(mpz_t *A, size_t acount,
+                                   mpz_t *B, size_t bcount,
+                                   size_t acells, size_t bcells,
+                                   size_t planes, int r, int d,
+                                   size_t terms)
+{
+    size_t total_limbs = 0;
+    size_t rows_plus_dim;
+    size_t matrix_scale;
+    size_t threshold;
+    size_t crossover;
+    long tuned_crossover;
+
+    if (hw_disable_fft || d <= 2 || !mpz_rmatrix_fft_shape_safe(r, d) ||
+        terms > UINT_MAX || acount > SIZE_MAX / sizeof(mpzfft_t) ||
+        bcount > SIZE_MAX / sizeof(mpzfft_t))
+        return 0;
+
+    tuned_crossover = mpz_mat_fft_crossover(d);
+    if (tuned_crossover <= 0)
+        return 0;
+    crossover = (size_t)tuned_crossover;
+    if (!mpz_rmatrix_size_add((size_t)r, (size_t)d, &rows_plus_dim) ||
+        !mpz_rmatrix_size_mul(rows_plus_dim, (size_t)d, &matrix_scale) ||
+        !mpz_rmatrix_size_mul(matrix_scale, crossover, &threshold))
+        return 0;
+    if (mpz_rmatrix_sampled_small(A, acells, B, bcells, planes, threshold))
+        return 0;
+
+    for (size_t i = 0; i < acount; i++)
+        mpz_rmatrix_pn_add_limbs(&total_limbs, mpz_size(A[i]));
+    for (size_t i = 0; i < bcount; i++)
+        mpz_rmatrix_pn_add_limbs(&total_limbs, mpz_size(B[i]));
+    return total_limbs > threshold;
+}
+
+static mpz_t *mpz_rmatrix_mult_pnq_fft(mpz_t *C, mpz_t *A, int r,
+                                       mpz_t *B, int d, int N,
+                                       size_t acells, size_t bcells,
+                                       size_t left_count,
+                                       size_t right_count, size_t terms,
+                                       size_t bits)
+{
+    mpzfft_params_t params;
+    mpzfft_t *AT, *BT, *CT, *product;
+    size_t left_bytes = left_count * sizeof(mpzfft_t);
+    size_t right_bytes = right_count * sizeof(mpzfft_t);
+    size_t product_bytes = acells * sizeof(mpzfft_t);
+    size_t n = (size_t)N;
+
+    assert(mpzfft_initialized);
+    assert(terms <= UINT_MAX);
+    mpzfft_params_init(&params, bits, (unsigned)terms, HW_ZZ_PRIMES,
+                       &zz_moduli);
+
+    AT = mpz_rmatrix_workspace_alloc(left_bytes);
+    for (size_t i = 0; i < left_count; i++) {
+        mpzfft_init(AT[i], &params);
+        mpzfft_fft(AT[i], A[i], mpzfft_threads);
+    }
+    BT = mpz_rmatrix_workspace_alloc(right_bytes);
+    for (size_t i = 0; i < right_count; i++) {
+        mpzfft_init(BT[i], &params);
+        mpzfft_fft(BT[i], B[i], mpzfft_threads);
+    }
+    CT = mpz_rmatrix_workspace_alloc(left_bytes);
+    for (size_t i = 0; i < left_count; i++)
+        mpzfft_init(CT[i], &params);
+    product = mpz_rmatrix_workspace_alloc(product_bytes);
+    for (size_t i = 0; i < acells; i++)
+        mpzfft_init(product[i], &params);
+
+    /* Coefficients are stored at (P exponent * N + Q exponent). The inner
+       matrix product order is always A coefficient times B coefficient;
+       P and Q commute as exponents, while matrix coefficients do not. */
+    for (size_t ap = 0; ap < n; ap++) {
+        for (size_t aq = 0; aq < n; aq++) {
+            size_t a_coeff = ap * n + aq;
+            for (size_t bp = 0; bp < n - ap; bp++) {
+                for (size_t bq = 0; bq < n - aq; bq++) {
+                    size_t b_coeff = bp * n + bq;
+                    size_t c_coeff = (ap + bp) * n + aq + bq;
+                    mpzfft_matrix_mul(product, AT + a_coeff * acells,
+                                      BT + b_coeff * bcells, (unsigned)r,
+                                      (unsigned)d, (unsigned)d,
+                                      mpzfft_threads);
+                    for (size_t i = 0; i < acells; i++)
+                        mpzfft_add(CT[c_coeff * acells + i],
+                                   CT[c_coeff * acells + i], product[i],
+                                   mpzfft_threads);
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < left_count; i++)
+        mpzfft_ifft(C[i], CT[i], mpzfft_threads);
+
+    for (size_t i = 0; i < acells; i++)
+        mpzfft_clear(product[i]);
+    for (size_t i = 0; i < left_count; i++)
+        mpzfft_clear(CT[i]);
+    for (size_t i = 0; i < right_count; i++)
+        mpzfft_clear(BT[i]);
+    for (size_t i = 0; i < left_count; i++)
+        mpzfft_clear(AT[i]);
+    hw_free(product, product_bytes);
+    hw_free(CT, left_bytes);
+    hw_free(BT, right_bytes);
+    hw_free(AT, left_bytes);
+    mpzfft_params_clear(&params);
+    return C;
+}
+
+static void mpz_rmatrix_mult_pnq_classical(mpz_t *C, mpz_t *A, int r,
+                                           mpz_t *B, int d, int N,
+                                           size_t acells, size_t bcells,
+                                           size_t left_count, mpz_t w)
+{
+    size_t n = (size_t)N;
+
+    /* Initialize each output coefficient with A_(0,0) * B_(p,q), then
+       accumulate the remaining valid coefficient pairs. */
+    for (size_t cp = 0; cp < n; cp++) {
+        for (size_t cq = 0; cq < n; cq++) {
+            size_t b_offset = (cp * n + cq) * bcells;
+            size_t c_offset = (cp * n + cq) * acells;
+            for (int row = 0; row < r; row++) {
+                size_t a_row = (size_t)row * (size_t)d;
+                size_t c_row = c_offset + (size_t)row * (size_t)d;
+                size_t b_row = b_offset;
+                for (int col = 0; col < d; col++)
+                    mpz_mul(C[c_row + (size_t)col], A[a_row],
+                            B[b_row + (size_t)col]);
+                for (int inner = 1; inner < d; inner++) {
+                    size_t a = a_row + (size_t)inner;
+                    b_row = b_offset + (size_t)inner * (size_t)d;
+                    for (int col = 0; col < d; col++)
+                        mpz_addmul(C[c_row + (size_t)col], A[a],
+                                   B[b_row + (size_t)col]);
+                }
+            }
+        }
+    }
+
+    for (size_t ap = 0; ap < n; ap++) {
+        for (size_t aq = 0; aq < n; aq++) {
+            if (ap == 0 && aq == 0)
+                continue;
+            size_t a_coeff = ap * n + aq;
+            for (size_t bp = 0; bp < n - ap; bp++) {
+                for (size_t bq = 0; bq < n - aq; bq++) {
+                    size_t b_coeff = bp * n + bq;
+                    size_t c_coeff = (ap + bp) * n + aq + bq;
+                    size_t a_offset = a_coeff * acells;
+                    size_t b_offset = b_coeff * bcells;
+                    size_t c_offset = c_coeff * acells;
+                    for (int row = 0; row < r; row++) {
+                        size_t a_row = a_offset + (size_t)row * (size_t)d;
+                        size_t c_row = c_offset + (size_t)row * (size_t)d;
+                        for (int inner = 0; inner < d; inner++) {
+                            size_t a = a_row + (size_t)inner;
+                            size_t b_row = b_offset + (size_t)inner * (size_t)d;
+                            for (int col = 0; col < d; col++)
+                                mpz_addmul(C[c_row + (size_t)col], A[a],
+                                           B[b_row + (size_t)col]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (void)w;
+}
+
+mpz_t *mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B,
+                            int d, int N, mpz_t w)
+{
+    size_t acells, bcells, coefficients, left_count, right_count, terms;
+
+    mpz_rmatrix_pnq_sizes(r, d, N, &acells, &bcells, &coefficients,
+                          &left_count, &right_count, &terms);
+    if (N == 1) {
+        mpz_rmatrix_mult(C, A, r, B, d, w);
+        return C;
+    }
+
+    if (mpz_rmatrix_pnq_use_fft(A, left_count, B, right_count, acells,
+                                bcells, coefficients, r, d, terms)) {
+        size_t bits;
+        if (mpz_rmatrix_pn_product_bits(A, left_count, B, right_count,
+                                        terms, &bits) &&
+            bits <= SIZE_MAX - 63)
+            return mpz_rmatrix_mult_pnq_fft(C, A, r, B, d, N, acells,
+                                             bcells, left_count, right_count,
+                                             terms, bits);
+    }
+    mpz_rmatrix_mult_pnq_classical(C, A, r, B, d, N, acells, bcells,
+                                   left_count, w);
+    return C;
+}

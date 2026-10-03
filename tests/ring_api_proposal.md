@@ -68,7 +68,7 @@ activated as their APIs land:
    nonaliasing output semantics.
 2. PR 3 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
    independent direct coefficient-ring GMP product.
-3. PR 4 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
+3. PR 4 enables bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
    the highest corner and separately exercises overflow in P and Q, which
    distinguishes box truncation from total-degree truncation.
 4. PR 5 enables forest comparisons against a direct sequential coefficient
@@ -79,6 +79,9 @@ activated as their APIs land:
    fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
    come from direct GMP loops rather than a production backend.
 
-No ring implementation exists on this branch, so the guarded bodies are not
-compiled or claimed to pass yet. The ordinary test command reports this state
-instead of hiding it or attempting to compile against absent APIs.
+The P², P^n, and bivariate multiplication facades and their constructed exact
+references are enabled together on the stage-4 branch. The test also checks
+that each coefficient entry is transformed once, every truncated Fourier-side
+matrix product is counted, each output is reconstructed once, aliased input
+pointers remain valid, and `hw_disable_fft` takes the exact classical path.
+Forest tests remain disabled until the final forest integration stage.

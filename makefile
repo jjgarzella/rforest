@@ -60,9 +60,12 @@ test_ring_forest_disabled: tests/test_ring_forest_disabled.o librforest.a
 bench_ring_baselines: tests/bench_ring_baselines.o librforest.a hwmpz.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
-.PHONY: bench-ring
+.PHONY: bench-ring bench-ring-pnq
 bench-ring: bench_ring_baselines
 	./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt
+
+bench-ring-pnq: bench_ring_baselines
+	./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt --pnq-optimized
 
 tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
@@ -71,7 +74,7 @@ tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
 tests/test_ring_matmul.o: tests/test_ring_matmul.c
-	$(CC) $(CFLAGS) -DRFOREST_ENABLE_P2_MATMUL_TESTS -DRFOREST_ENABLE_PN_MATMUL_TESTS $(INCLUDES) -I. -o $@ -c $<
+	$(CC) $(CFLAGS) -DRFOREST_ENABLE_P2_MATMUL_TESTS -DRFOREST_ENABLE_PN_MATMUL_TESTS -DRFOREST_ENABLE_RING_MATMUL_TESTS $(INCLUDES) -I. -o $@ -c $<
 
 tests/test_ring_forest_disabled.o: tests/test_ring_forest_disabled.c
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
