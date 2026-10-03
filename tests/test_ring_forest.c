@@ -1,31 +1,11 @@
 #include <stdio.h>
-
-#ifndef RFOREST_ENABLE_RING_FOREST_TESTS
-
-int main(void)
-{
-    puts("DISABLED ring forest tests: activate with ring forest PR 5");
-    return 0;
-}
-
-#else
-
 #include <stdlib.h>
 #include <string.h>
 
 #include <gmp.h>
 
 #include "rforest.h"
-
-/* Proposed facades and coefficient layouts are documented in ring_api_proposal.md. */
-void rforest_p2(mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
-                mpz_t *m, long kbase, long *k, long n, mpz_t z, int kappa);
-void rforest_pn(mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
-                int nP, mpz_t *m, long kbase, long *k, long n, mpz_t z,
-                int kappa);
-void rforest_pnq(mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
-                 int N, mpz_t *m, long kbase, long *k, long n, mpz_t z,
-                 int kappa);
+#include "hwmpz.h"
 
 static mpz_t *new_values(size_t count)
 {
@@ -59,8 +39,8 @@ static void set_pattern(mpz_t *values, size_t count, int seed)
     }
 }
 
-static void ring_step_mod(mpz_t *next, const mpz_t *current,
-                          const mpz_t *evaluated, int np, int nq,
+static void ring_step_mod(mpz_t *next, mpz_t *current,
+                          mpz_t *evaluated, int np, int nq,
                           int rows, int dim, mpz_t modulus)
 {
     const size_t coefficients = coeff_count(np, nq);
@@ -101,8 +81,8 @@ static void ring_step_mod(mpz_t *next, const mpz_t *current,
     mpz_clear(product);
 }
 
-static void reference_endpoint(mpz_t *result, const mpz_t *initial_v,
-                               const mpz_t *M, int rows, int dim, int deg,
+static void reference_endpoint(mpz_t *result, mpz_t *initial_v,
+                               mpz_t *M, int rows, int dim, int deg,
                                int np, int nq, long kbase, long endpoint,
                                mpz_t modulus)
 {
@@ -144,7 +124,7 @@ static void reference_endpoint(mpz_t *result, const mpz_t *initial_v,
     clear_values(evaluated, coefficients * dcells);
 }
 
-static int equal_values(const mpz_t *left, const mpz_t *right, size_t count)
+static int equal_values(mpz_t *left, mpz_t *right, size_t count)
 {
     for (size_t i = 0; i < count; i++)
         if (mpz_cmp(left[i], right[i]) != 0)
@@ -152,9 +132,9 @@ static int equal_values(const mpz_t *left, const mpz_t *right, size_t count)
     return 1;
 }
 
-static void check_p2_block_embedding(const mpz_t *M, const mpz_t *initial_v,
-                                    const mpz_t *ring_outputs,
-                                    const mpz_t *ring_final_v,
+static void check_p2_block_embedding(mpz_t *M, mpz_t *initial_v,
+                                    mpz_t *ring_outputs,
+                                    mpz_t *ring_final_v,
                                     mpz_t *moduli, long *endpoints,
                                     long kbase, int rows, int dim, int deg,
                                     int kappa, mpz_t ring_final_z)
@@ -348,11 +328,19 @@ static void one_family(int family, int np, int nq)
 
 int main(void)
 {
+    int previous_hw_disable_fft = hw_disable_fft;
     one_family(0, 2, 1); /* P^2, with coefficientwise residues */
     one_family(1, 3, 1); /* independent direct P^n reference */
     one_family(2, 2, 2); /* bivariate P/Q box, not total degree */
+    one_family(1, 1, 1); /* P^1 agrees with integer forest arithmetic */
+    one_family(2, 1, 1); /* P^1,Q^1 agrees with integer arithmetic */
+    hw_disable_fft = 1;
+    one_family(0, 2, 1);
+    one_family(1, 3, 1);
+    one_family(2, 2, 2);
+    one_family(1, 1, 1);
+    one_family(2, 1, 1);
+    hw_disable_fft = previous_hw_disable_fft;
     puts("PASS ring forest exact sequential references");
     return 0;
 }
-
-#endif

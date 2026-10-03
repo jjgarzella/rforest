@@ -20,7 +20,7 @@ int main(void)
 #include "hwmpz.h"
 #include "mpzfft.h"
 
-/* Proposed coefficient-major API; see ring_api_proposal.md. */
+/* Coefficient-major API details are documented in ring_api.md. */
 #if defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
     defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
 mpz_t *mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,

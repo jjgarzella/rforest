@@ -1,0 +1,4 @@
+case,algorithm,median_ns,mad_ns
+p2_dim4_rows4_degree1_n64_kappa0,p2-ring-forest,2940416,155416
+p2_dim4_rows4_degree1_n64_kappa0,integer-block-forest,3414417,128834
+p2_dim4_rows4_degree1_n64_kappa0,naive-ring-adapter,355291,12999
