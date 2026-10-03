@@ -45,6 +45,9 @@ static void mpz_rmatrix_pn_sizes(int r, int d, int n,
                                  size_t *left_count, size_t *right_count,
                                  size_t *terms);
 static int mpz_rmatrix_fft_shape_safe(int r, int d);
+static int mpz_rmatrix_sampled_small(mpz_t *A, size_t acells,
+                                     mpz_t *B, size_t bcells,
+                                     size_t planes, size_t threshold);
 
 mpz_t *mpz_vec_mod_fft (mpz_t *A, mpz_t *B, long n, mpz_t m)
 {
@@ -120,19 +123,23 @@ static void mpz_rmatrix_mult_p2_naive(mpz_t *C, mpz_t *A, int r,
     size_t bcells = (size_t)d * (size_t)d;
 
     for (int i = 0; i < r; i++) {
+        size_t row = (size_t)i * (size_t)d;
         for (int j = 0; j < d; j++) {
-            size_t out = (size_t)i * (size_t)d + (size_t)j;
-            mpz_set_zero(C[out]);
-            mpz_set_zero(C[acells + out]);
-            for (int k = 0; k < d; k++) {
-                mpz_addmul(C[out], A[(size_t)i * (size_t)d + (size_t)k],
-                           B[(size_t)k * (size_t)d + (size_t)j]);
-                mpz_addmul(C[acells + out],
-                           A[(size_t)i * (size_t)d + (size_t)k],
-                           B[bcells + (size_t)k * (size_t)d + (size_t)j]);
-                mpz_addmul(C[acells + out],
-                           A[acells + (size_t)i * (size_t)d + (size_t)k],
-                           B[(size_t)k * (size_t)d + (size_t)j]);
+            size_t out = row + (size_t)j;
+            mpz_mul(C[out], A[row], B[j]);
+            mpz_mul(C[acells + out], A[row], B[bcells + (size_t)j]);
+            mpz_addmul(C[acells + out], A[acells + row], B[j]);
+        }
+        for (int k = 1; k < d; k++) {
+            size_t a0 = row + (size_t)k;
+            size_t a1 = acells + a0;
+            size_t b0 = (size_t)k * (size_t)d;
+            size_t b1 = bcells + b0;
+            for (int j = 0; j < d; j++) {
+                size_t out = row + (size_t)j;
+                mpz_addmul(C[out], A[a0], B[b0 + (size_t)j]);
+                mpz_addmul(C[acells + out], A[a0], B[b1 + (size_t)j]);
+                mpz_addmul(C[acells + out], A[a1], B[b0 + (size_t)j]);
             }
         }
     }
@@ -232,6 +239,8 @@ static int mpz_rmatrix_p2_use_fft(mpz_t *A, size_t acells, mpz_t *B,
     if (!mpz_rmatrix_size_add((size_t)r, (size_t)d, &rows_plus_dim) ||
         !mpz_rmatrix_size_mul(rows_plus_dim, (size_t)d, &matrix_scale) ||
         !mpz_rmatrix_size_mul(matrix_scale, crossover, &threshold))
+        return 0;
+    if (mpz_rmatrix_sampled_small(A, acells, B, bcells, 2, threshold))
         return 0;
 
     for (size_t i = 0; i < 2 * acells; i++) {
@@ -596,24 +605,33 @@ static void mpz_rmatrix_mult_pn_classical(mpz_t *C, mpz_t *A, int r,
                                           size_t acells, size_t bcells,
                                           mpz_t w)
 {
-    size_t output_count = (size_t)n * acells;
-
-    for (size_t i = 0; i < output_count; i++)
-        mpz_set_zero(C[i]);
     for (int ai = 0; ai < n; ai++) {
         size_t a_offset = (size_t)ai * acells;
         for (int bi = 0; bi < n - ai; bi++) {
             size_t b_offset = (size_t)bi * bcells;
             size_t c_offset = (size_t)(ai + bi) * acells;
-            for (int row = 0; row < r; row++) {
-                for (int col = 0; col < d; col++) {
-                    size_t out = c_offset + (size_t)row * (size_t)d +
-                                 (size_t)col;
+            int first_inner = ai == 0 ? 1 : 0;
+            if (ai == 0) {
+                for (int row = 0; row < r; row++) {
                     size_t left = a_offset + (size_t)row * (size_t)d;
-                    size_t right = b_offset + (size_t)col;
-                    for (int inner = 0; inner < d; inner++)
-                        mpz_addmul(C[out], A[left + (size_t)inner],
-                                   B[right + (size_t)inner * (size_t)d]);
+                    for (int col = 0; col < d; col++) {
+                        size_t out = c_offset + (size_t)row * (size_t)d +
+                                     (size_t)col;
+                        size_t right = b_offset + (size_t)col;
+                        mpz_mul(C[out], A[left], B[right]);
+                    }
+                }
+            }
+            for (int inner = first_inner; inner < d; inner++) {
+                size_t right = b_offset + (size_t)inner * (size_t)d;
+                for (int row = 0; row < r; row++) {
+                    size_t left = a_offset + (size_t)row * (size_t)d +
+                                  (size_t)inner;
+                    size_t out_row = c_offset + (size_t)row * (size_t)d;
+                    for (int col = 0; col < d; col++) {
+                        mpz_addmul(C[out_row + (size_t)col], A[left],
+                                   B[right + (size_t)col]);
+                    }
                 }
             }
         }

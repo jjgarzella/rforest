@@ -30,7 +30,8 @@ typedef struct {
 } ring_case;
 
 static const unsigned warmup_count = 2;
-static const unsigned repeat_count = 9;
+static const unsigned repeat_count = 27;
+static const unsigned sample_batch_count = 16;
 
 static mpz_t *mpz_array_new(size_t count)
 {
@@ -502,6 +503,23 @@ static int compare_u64(const void *left, const void *right)
 
 typedef void (*product_function)(const ring_case *, mpz_t *);
 
+static void run_product_once(product_function product, const ring_case *test,
+                             size_t count)
+{
+    mpz_t *result = mpz_array_new(count);
+    product(test, result);
+    mpz_array_clear(result, count);
+}
+
+static uint64_t time_product_batch(product_function product,
+                                   const ring_case *test, size_t count)
+{
+    uint64_t start = now_ns();
+    for (unsigned i = 0; i < sample_batch_count; i++)
+        run_product_once(product, test, count);
+    return (now_ns() - start) / sample_batch_count;
+}
+
 static void summarize_samples(uint64_t *samples, uint64_t *median,
                               uint64_t *mad)
 {
@@ -521,21 +539,12 @@ static void measure(product_function product, const ring_case *test,
 {
     const size_t count = test->coefficient_count * matrix_cells(test);
     uint64_t samples[repeat_count];
-    mpz_t *result;
 
-    for (unsigned i = 0; i < warmup_count; i++) {
-        result = mpz_array_new(count);
-        product(test, result);
-        mpz_array_clear(result, count);
-    }
-    for (unsigned i = 0; i < repeat_count; i++) {
-        uint64_t start;
-        start = now_ns();
-        result = mpz_array_new(count);
-        product(test, result);
-        samples[i] = now_ns() - start;
-        mpz_array_clear(result, count);
-    }
+    for (unsigned i = 0; i < warmup_count; i++)
+        for (unsigned j = 0; j < sample_batch_count; j++)
+            run_product_once(product, test, count);
+    for (unsigned i = 0; i < repeat_count; i++)
+        samples[i] = time_product_batch(product, test, count);
     summarize_samples(samples, median, mad);
 }
 
@@ -551,19 +560,15 @@ static void measure_paired(product_function adapter, product_function block,
 
     for (unsigned i = 0; i < warmup_count; i++) {
         for (unsigned algorithm = 0; algorithm < 3; algorithm++) {
-            mpz_t *result = mpz_array_new(count);
-            products[algorithm](test, result);
-            mpz_array_clear(result, count);
+            for (unsigned j = 0; j < sample_batch_count; j++)
+                run_product_once(products[algorithm], test, count);
         }
     }
     for (unsigned repeat = 0; repeat < repeat_count; repeat++) {
         for (unsigned position = 0; position < 3; position++) {
             unsigned algorithm = (repeat + position) % 3;
-            uint64_t start = now_ns();
-            mpz_t *result = mpz_array_new(count);
-            products[algorithm](test, result);
-            samples[algorithm][repeat] = now_ns() - start;
-            mpz_array_clear(result, count);
+            samples[algorithm][repeat] = time_product_batch(
+                products[algorithm], test, count);
         }
     }
     summarize_samples(samples[0], adapter_median, adapter_mad);
