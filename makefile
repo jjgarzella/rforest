@@ -71,7 +71,7 @@ tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
 tests/test_ring_matmul.o: tests/test_ring_matmul.c
-	$(CC) $(CFLAGS) -DRFOREST_ENABLE_P2_MATMUL_TESTS $(INCLUDES) -I. -o $@ -c $<
+	$(CC) $(CFLAGS) -DRFOREST_ENABLE_P2_MATMUL_TESTS -DRFOREST_ENABLE_PN_MATMUL_TESTS $(INCLUDES) -I. -o $@ -c $<
 
 tests/test_ring_forest_disabled.o: tests/test_ring_forest_disabled.c
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<

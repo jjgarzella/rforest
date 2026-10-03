@@ -104,3 +104,37 @@ also verifies that ordinary dispatch observes one forward transform per input
 coefficient entry, three Fourier matrix products, and one inverse transform
 per output coefficient entry, and that `hw_disable_fft` takes the exact
 classical fallback.
+
+## Arbitrary univariate implementation comparison
+
+Reproduce the stage-3 univariate comparison with:
+
+```sh
+make bench_ring_baselines
+./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt \
+  --pn-optimized > tests/fixtures/aws_ring/pn_optimized_results.csv
+```
+
+The 67 cases include all three captured AWS P² products, the 16 synthetic P²
+cases, and the complete univariate baseline grid for `n=1,3,5`. The native
+facade also uses the existing specialized P² implementation for the P² rows.
+For each case, the command checks the adapter, block embedding, and native
+result against the direct GMP coefficient reference, then records two warmups,
+nine repeated medians, median absolute deviations, and native ratios against
+both baselines. For the timed samples, adapter, block, and native algorithms
+run in a rotating interleaved order. The adapter makes `n(n+1)/2` integer
+matrix calls for an univariate truncation `n`. This run used GCC 13.3.0, GMP
+6.3.0, Linux 6.12.76-linuxkit on aarch64, on 2026-10-03.
+
+The recorded same-run native/block ratios range from 0.088 to 0.671. Same-run
+native/adapter ratios range from 0.500 to 1.178; 6 nominal ratios exceed 1,
+and 3 differences exceed the sum of that case's adapter and native MADs. The
+largest ratio is 1.178 for the sparse P² 8x1 512-bit case; its 208-nanosecond
+difference is within the combined 625-nanosecond MAD. The differences outside
+combined MADs are 1,958 nanoseconds for the dense P² 8x8 512-bit case,
+1,458 nanoseconds for the dense P^5 3x6 32-bit case, and 4,292 nanoseconds
+for the dense P^5 3x6 256-bit case. The P² rows track regression alongside
+the P^n cases.
+`pn_optimized_results.csv` retains all per-case timings and variability; its
+adapter and block columns are the paired baselines for this run. The separate
+`baseline_results.csv` remains the original pre-optimization reference.

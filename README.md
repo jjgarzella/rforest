@@ -24,10 +24,11 @@ uses C, GMP, and the checked-in fixture files; Sage, Python, and zeta data are
 not needed at test runtime. Fixture provenance and the text schema are
 documented in `tests/fixtures/aws/README.md`.
 
-The ring matmul and forest APIs are staged for later PRs. `make test` reports
-their guarded native C/GMP suites as disabled until those APIs land. Their
-planned layouts, activation points, exact AWS P² products, and benchmark
-baselines are documented in `tests/ring_api_proposal.md` and
+The P² and arbitrary univariate P^n matrix multiplication APIs are active in
+`make test`, including their exact GMP references and deterministic Fourier
+reuse checks. Bivariate matrix multiplication and ring forests remain staged
+for later PRs. Their layouts, AWS P² fixtures, and benchmark baselines are
+documented in `tests/ring_api_proposal.md` and
 `tests/fixtures/aws_ring/README.md`. Run `make bench-ring` to print the
-per-case comparisons against the scalar ring adapter and integer block
-embedding baselines.
+baseline comparisons against the scalar ring adapter and integer block
+embedding.
