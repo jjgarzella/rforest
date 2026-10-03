@@ -156,3 +156,51 @@ native/adapter median ratio of 1.010, but the 734 ns difference was below the
 combined within-run MAD of 9,964 ns. The aggregate table has no per-case median
 regressions against either baseline. The original
 `baseline_results.csv` remains the pre-optimization reference.
+
+## Bivariate implementation comparison
+
+Reproduce the stage-4 bivariate comparison with three independent processes:
+
+```sh
+make bench_ring_baselines
+for run in 1 2 3; do
+  ./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt \
+    --pnq-optimized > "/tmp/pnq_run_${run}.csv"
+done
+python3 tests/fixtures/aws_ring/aggregate_pn_benchmarks.py --family pnq \
+  /tmp/pnq_run_1.csv /tmp/pnq_run_2.csv /tmp/pnq_run_3.csv \
+  > tests/fixtures/aws_ring/pnq_optimized_results.csv
+```
+
+The 48 fixed bivariate cases cover `N=1,2,3`, dimensions 2 and 4, one-row
+and square left operands, 32/256-bit signed inputs, and dense/sparse
+coefficients. `--pnq-optimized` starts at the same deterministic seed position
+as the bivariate section of the original 115-case grid. Each case checks the
+direct GMP reference, the integer block embedding, the naive coefficient-pair
+adapter, and the bivariate facade before timing. The three algorithms are
+measured in rotating paired order with two warmups, 27 samples per process,
+and 16 complete operations per sample; allocation, transforms, reconstruction,
+embedding, and ring assembly stay inside the timed operation. The final CSV
+reports the median of the three process medians and the MAD across those
+medians for each algorithm.
+
+The one-process exploratory result is retained in
+`pnq_optimized_results_initial.csv`. Its two dense, full-row 256-bit cases at
+`N=2` and `N=3` had native/adapter ratios of 1.013 and 1.037, both within the
+combined per-process MAD. The classical path was tightened to initialize each
+output from its first matrix product and accumulate the remaining products.
+The three-process aggregate in `pnq_optimized_results.csv` has no per-case
+median regression: all 48 cases beat both baselines, with native/adapter ratios
+from 0.375 to 0.955 and native/block ratios from 0.043 to 0.604. The closest
+adapter case is dense `N=3`, 4x4, 256-bit input at 0.955. The independent exact
+test also confirms one forward transform per input entry, one inverse per
+output entry, and `[N(N+1)/2]^2` Fourier-side matrix products; for `N=3` these
+counts are 1152, 576, and 36 respectively. `hw_disable_fft` is checked against
+the same direct GMP reference.
+
+The existing arbitrary univariate facade was benchmarked again on this stage
+branch as a stack check. All 67 current univariate cases still beat both
+baselines: native/adapter ratios range from 0.270 to 0.998 and native/block
+ratios from 0.084 to 0.646. The accepted stage-3 result remains in
+`pn_optimized_results.csv`; the three-process stage-4 stack check is recorded
+separately in `pn_stack_check_results.csv`.
