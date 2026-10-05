@@ -1,6 +1,7 @@
 #include <stdio.h>
 
-#ifndef RFOREST_ENABLE_RING_MATMUL_TESTS
+#if !defined(RFOREST_ENABLE_P2_MATMUL_TESTS) && \
+    !defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
 
 int main(void)
 {
@@ -16,13 +17,49 @@ int main(void)
 #include <gmp.h>
 
 #include "hwmpz.h"
+#include "mpzfft.h"
 
 /* Proposed coefficient-major API; see ring_api_proposal.md. */
-void mpz_rmatrix_mult_p2(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t w);
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
 void mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
                          int n, mpz_t w);
 void mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
                           int N, mpz_t w);
+#endif
+
+static unsigned observed_forward_transforms;
+static unsigned observed_inverse_transforms;
+static unsigned observed_fourier_matrix_products;
+
+void __real_mpzfft_fft(mpzfft_t rop, mpz_t op, int threads);
+void __wrap_mpzfft_fft(mpzfft_t rop, mpz_t op, int threads)
+{
+    observed_forward_transforms++;
+    __real_mpzfft_fft(rop, op, threads);
+}
+
+void __real_mpzfft_ifft(mpz_t rop, mpzfft_t op, int threads);
+void __wrap_mpzfft_ifft(mpz_t rop, mpzfft_t op, int threads)
+{
+    observed_inverse_transforms++;
+    __real_mpzfft_ifft(rop, op, threads);
+}
+
+void __real_zz_mpnfft_poly_matrix_mul(zz_mpnfft_poly_t *rop,
+                                     zz_mpnfft_poly_t *op1,
+                                     zz_mpnfft_poly_t *op2,
+                                     unsigned dim1, unsigned dim2,
+                                     unsigned dim3, int threads);
+void __wrap_zz_mpnfft_poly_matrix_mul(zz_mpnfft_poly_t *rop,
+                                      zz_mpnfft_poly_t *op1,
+                                      zz_mpnfft_poly_t *op2,
+                                      unsigned dim1, unsigned dim2,
+                                      unsigned dim3, int threads)
+{
+    observed_fourier_matrix_products++;
+    __real_zz_mpnfft_poly_matrix_mul(rop, op1, op2, dim1, dim2, dim3,
+                                    threads);
+}
 
 enum { FIXTURE_LIMIT = 100000 };
 
@@ -67,7 +104,7 @@ static void fill_matrix(mpz_t *values, size_t count, int mode, unsigned seed)
     }
 }
 
-static void reference_product(mpz_t *C, const mpz_t *A, const mpz_t *B,
+static void reference_product(mpz_t *C, mpz_t *A, mpz_t *B,
                               int rows, int dim, int np, int nq, int bivariate)
 {
     const size_t acells = cells(rows, dim);
@@ -108,7 +145,7 @@ static void reference_product(mpz_t *C, const mpz_t *A, const mpz_t *B,
     (void)bivariate;
 }
 
-static int equal_values(const mpz_t *left, const mpz_t *right, size_t count)
+static int equal_values(mpz_t *left, mpz_t *right, size_t count)
 {
     for (size_t i = 0; i < count; i++)
         if (mpz_cmp(left[i], right[i]) != 0)
@@ -129,27 +166,55 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
     mpz_t *B = new_values(right_count);
     mpz_t *C = new_values(output_count);
     mpz_t *expected = new_values(output_count);
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+    mpz_t *saved_A = new_values(left_count);
+    mpz_t *saved_B = new_values(right_count);
+#endif
     mpz_t work;
 
     fill_matrix(A, left_count, mode, 2);
     fill_matrix(B, right_count, mode, 7);
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+    mpz_vec_set(saved_A, A, (long)left_count);
+    mpz_vec_set(saved_B, B, (long)right_count);
+#endif
     mpz_init(work);
     reference_product(expected, A, B, rows, dim, np, nq, bivariate);
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     if (bivariate)
         mpz_rmatrix_mult_pnq(C, A, rows, B, dim, np, work);
     else if (np == 2)
         mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
     else
         mpz_rmatrix_mult_pn(C, A, rows, B, dim, np, work);
+#else
+    if (bivariate || np != 2) {
+        fputs("P^2 test requested a ring family not enabled in this stage\n",
+              stderr);
+        abort();
+    }
+    mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
+#endif
     if (!equal_values(C, expected, output_count)) {
         fprintf(stderr, "%s: ring product differs from direct GMP reference\n", name);
         abort();
     }
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+    if (!equal_values(saved_A, A, left_count) ||
+        !equal_values(saved_B, B, right_count)) {
+        fprintf(stderr, "%s: ring product modified an input coefficient\n", name);
+        abort();
+    }
+#endif
     mpz_clear(work);
     clear_values(A, left_count);
     clear_values(B, right_count);
     clear_values(C, output_count);
     clear_values(expected, output_count);
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+    clear_values(saved_A, left_count);
+    clear_values(saved_B, right_count);
+#endif
 }
 
 static void expect_token(FILE *input, const char *expected)
@@ -168,6 +233,61 @@ static void read_values(FILE *input, mpz_t *values, size_t count)
         if (fscanf(input, "%4095s", token) != 1 || mpz_set_str(values[i], token, 10))
             abort();
     }
+}
+
+static void test_hyperelliptic_block_equivalence(mpz_t *A, mpz_t *B,
+                                                 mpz_t *expected, int dim)
+{
+    size_t cells = (size_t)dim * (size_t)dim;
+    size_t block_cells = 4 * cells;
+    mpz_t *left = new_values(block_cells);
+    mpz_t *right = new_values(block_cells);
+    mpz_t *product = new_values(block_cells);
+    mpz_t work;
+    int block_dim = 2 * dim;
+
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            size_t source = (size_t)row * (size_t)dim + (size_t)col;
+            mpz_set(left[(size_t)row * (size_t)block_dim + (size_t)col],
+                    A[source]);
+            mpz_set(left[(size_t)row * (size_t)block_dim + (size_t)dim +
+                          (size_t)col], A[cells + source]);
+            mpz_set(left[((size_t)dim + (size_t)row) * (size_t)block_dim +
+                         (size_t)dim + (size_t)col], A[source]);
+            mpz_set(right[(size_t)row * (size_t)block_dim + (size_t)col],
+                    B[source]);
+            mpz_set(right[(size_t)row * (size_t)block_dim + (size_t)dim +
+                          (size_t)col], B[cells + source]);
+            mpz_set(right[((size_t)dim + (size_t)row) * (size_t)block_dim +
+                          (size_t)dim + (size_t)col], B[source]);
+        }
+    }
+
+    mpz_init(work);
+    mpz_rmatrix_mult(product, left, block_dim, right, block_dim, work);
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            size_t expected_index = (size_t)row * (size_t)dim + (size_t)col;
+            size_t top_left = (size_t)row * (size_t)block_dim + (size_t)col;
+            size_t top_right = top_left + (size_t)dim;
+            size_t bottom_left = ((size_t)dim + (size_t)row) *
+                                 (size_t)block_dim + (size_t)col;
+            size_t bottom_right = bottom_left + (size_t)dim;
+            if (mpz_cmp(product[top_left], expected[expected_index]) != 0 ||
+                mpz_cmp(product[top_right], expected[cells + expected_index]) != 0 ||
+                mpz_sgn(product[bottom_left]) != 0 ||
+                mpz_cmp(product[bottom_right], expected[expected_index]) != 0) {
+                fputs("captured P^2 product disagreed with integer block embedding\n",
+                      stderr);
+                abort();
+            }
+        }
+    }
+    mpz_clear(work);
+    clear_values(left, block_cells);
+    clear_values(right, block_cells);
+    clear_values(product, block_cells);
 }
 
 static void test_captured_products(const char *path)
@@ -235,6 +355,7 @@ static void test_captured_products(const char *path)
             fprintf(stderr, "captured P^2 exact product mismatch: %s\n", token);
             abort();
         }
+        test_hyperelliptic_block_equivalence(A, B, expected, dim);
         mpz_clear(work);
         clear_values(A, 2 * count);
         clear_values(B, 2 * count);
@@ -292,6 +413,84 @@ static void test_p2_order_and_cancellation(void)
     clear_values(BA, 8);
 }
 
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+static void test_shared_fourier_dispatch(void)
+{
+    const int rows = 8;
+    const int dim = 8;
+    const size_t acells = (size_t)rows * (size_t)dim;
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    const size_t input_entries = 2 * acells + 2 * bcells;
+    size_t threshold = ((size_t)rows + (size_t)dim) * (size_t)dim *
+                       (size_t)mpz_mat_fft_crossover(dim);
+    size_t limbs = threshold / input_entries + 1;
+    mpz_t *A = new_values(2 * acells);
+    mpz_t *B = new_values(2 * bcells);
+    mpz_t *C = new_values(2 * acells);
+    mpz_t *expected = new_values(2 * acells);
+    mpz_t work;
+
+    if (limbs == 0 || limbs > (SIZE_MAX / GMP_NUMB_BITS)) {
+        fputs("invalid P^2 Fourier dispatch test size\n", stderr);
+        abort();
+    }
+    for (size_t i = 0; i < 2 * acells; i++) {
+        mpz_set_ui(A[i], (unsigned long)(i % 31) + 1);
+        mpz_setbit(A[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(A[i], A[i]);
+    }
+    for (size_t i = 0; i < 2 * bcells; i++) {
+        mpz_set_ui(B[i], (unsigned long)(i % 29) + 1);
+        mpz_setbit(B[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(B[i], B[i]);
+    }
+    mpz_init(work);
+    reference_product(expected, A, B, rows, dim, 2, 1, 0);
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 0;
+    mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
+
+    if (!equal_values(C, expected, 2 * acells)) {
+        fputs("P^2 Fourier result disagreed with direct GMP reference\n", stderr);
+        abort();
+    }
+    if (observed_forward_transforms != input_entries ||
+        observed_inverse_transforms != 2 * acells ||
+        observed_fourier_matrix_products != 3) {
+        fprintf(stderr,
+                "P^2 Fourier reuse counts: forward=%u inverse=%u matrix=%u\n",
+                observed_forward_transforms, observed_inverse_transforms,
+                observed_fourier_matrix_products);
+        abort();
+    }
+
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 1;
+    mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
+    if (!equal_values(C, expected, 2 * acells) ||
+        observed_forward_transforms != 0 ||
+        observed_inverse_transforms != 0 ||
+        observed_fourier_matrix_products != 0) {
+        fputs("P^2 hw_disable_fft fallback was incorrect or used Fourier transforms\n",
+              stderr);
+        abort();
+    }
+    hw_disable_fft = 0;
+    mpz_clear(work);
+    clear_values(A, 2 * acells);
+    clear_values(B, 2 * bcells);
+    clear_values(C, 2 * acells);
+    clear_values(expected, 2 * acells);
+}
+#endif
+
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
 static void test_bivariate_box_corner(void)
 {
     mpz_t *A = new_values(9);
@@ -320,26 +519,39 @@ static void test_bivariate_box_corner(void)
     clear_values(C, 9);
     clear_values(expected, 9);
 }
+#endif
 
 int main(int argc, char **argv)
 {
     const char *captured_fixture = argc > 1 ? argv[1]
         : "tests/fixtures/aws_ring/p2_aws_products.txt";
+    hw_disable_fft = 0;
+    hw_mpz_setup();
     test_captured_products(captured_fixture);
     /* Base matrix API forbids C overlapping A or B; this ring API keeps that contract. */
     run_case("p2-signed-dense-rectangular", 2, 1, 2, 3, 0, 0);
     run_case("p2-sparse", 2, 1, 1, 4, 1, 0);
     run_case("p2-zero", 2, 1, 2, 3, 2, 0);
     run_case("p2-large", 2, 1, 2, 3, 3, 0);
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     run_case("pn-one-is-integer-matmul", 1, 1, 2, 3, 0, 0);
     run_case("pn-three", 3, 1, 2, 3, 0, 0);
     run_case("pn-five-cancellation-shapes", 5, 1, 2, 3, 1, 0);
     run_case("pnq-one", 1, 1, 2, 3, 0, 1);
     run_case("pnq-two", 2, 2, 2, 3, 1, 1);
     run_case("pnq-three-box-and-high-corner", 3, 3, 2, 3, 0, 1);
+#endif
     test_p2_order_and_cancellation();
+#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+    test_shared_fourier_dispatch();
+#endif
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     test_bivariate_box_corner();
+#else
+    puts("DISABLED P^n and bivariate ring matrix tests: activate in PRs 4-5");
+#endif
     puts("PASS ring matrix API exact references");
+    hw_mpz_clear();
     return 0;
 }
 

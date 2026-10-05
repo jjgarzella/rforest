@@ -59,13 +59,13 @@ separate work array before copying back; ring-specific in-place wrappers can
 follow that pattern if a later caller needs them. The `hw_disable_fft` switch
 selects the same classical fallback behavior as the integer matrix API.
 
-## Disabled test milestones
+## Test milestones
 
-`make test` keeps the hyperelliptic forest suite enabled and prints explicit
-disabled status for the new ring tests. The guarded C/GMP test bodies are
+`make test` keeps the hyperelliptic forest suite enabled and runs the P²
+matmul tests on this branch. The remaining guarded C/GMP test bodies are
 activated as their APIs land:
 
-1. PR 3 enables P² matmul tests and checks the exact P7 source products in
+1. The P² matmul tests check the exact P7 source products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
@@ -78,10 +78,10 @@ activated as their APIs land:
    ring reference, with the transition polynomial `x` kept separate from P/Q,
    rectangular initial `V`, exclusive endpoints, three `kappa` values,
    coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
-   also gets block-embedding equivalence cases based on the captured hyperelliptic forest
-   fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
+   also gets block-embedding equivalence cases based on the captured
+   hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
    come from direct GMP loops rather than a production backend.
 
-No ring implementation exists on this branch, so the guarded bodies are not
-compiled or claimed to pass yet. The ordinary test command reports this state
-instead of hiding it or attempting to compile against absent APIs.
+P² ring matrix multiplication is implemented on this branch. The P^n,
+bivariate, and ring forest APIs have not landed yet, so their guarded bodies
+remain uncompiled and `make test` reports their disabled state.
