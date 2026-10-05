@@ -4,7 +4,7 @@
 
 int main(void)
 {
-    puts("DISABLED ring forest tests: activate with ring forest PR 5");
+    puts("DISABLED ring forest tests: activate with ring forest PR 6");
     return 0;
 }
 

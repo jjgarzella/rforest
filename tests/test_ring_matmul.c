@@ -6,7 +6,7 @@
 
 int main(void)
 {
-    puts("DISABLED ring matrix tests: activate with ring matmul PRs 2-4");
+    puts("DISABLED ring matrix tests: activate with ring matmul PRs 3-5");
     return 0;
 }
 
@@ -704,7 +704,7 @@ int main(int argc, char **argv)
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     test_bivariate_box_corner();
 #else
-    puts("DISABLED bivariate ring matrix tests: activate in PR 4");
+    puts("DISABLED bivariate ring matrix tests: activate in PR 5");
 #endif
     puts("PASS ring matrix API exact references");
     hw_mpz_clear();
