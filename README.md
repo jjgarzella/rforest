@@ -11,10 +11,11 @@ Algorithm details are described in
 
 ## Native regression tests
 
-Run `make test` (or `make check`) to build the native fixture runner and replay
-all captured AWS cases in `tests/fixtures/aws/*.rf`. The command also replays
-the four small p=41 cases with `kappa=0` (tree regime) and `kappa=4` (sequential
-regime), then replays every case with `hw_disable_fft` enabled. Each fixture
+Run `make test` (or `make check`) to build the native hyperelliptic fixture
+runner and replay all captured curve cases stored under the source-provenance
+path `tests/fixtures/aws/*.rf`. The command also replays the four small p=41
+cases with `kappa=0` (tree regime) and `kappa=4` (sequential regime), then
+replays every case with `hw_disable_fft` enabled. Each fixture
 replay runs twice from fresh `V` and `z` state, checks every exact output
 residue and the final `z` and `V`, and verifies that the reusable matrix,
 modulus, and endpoint inputs were not changed. The ordinary pass asserts the
@@ -24,11 +25,16 @@ uses C, GMP, and the checked-in fixture files; Sage, Python, and zeta data are
 not needed at test runtime. Fixture provenance and the text schema are
 documented in `tests/fixtures/aws/README.md`.
 
+> **Upstream cleanup required:** This PR-stack status and its linked planning
+> and benchmark documents must be rewritten for upstream or removed before
+> merging into upstream rforest. Update or remove this README section at the
+> same time.
+
 The P² and arbitrary univariate P^n matrix multiplication APIs are active in
 `make test`, including their exact GMP references and deterministic Fourier
 reuse checks. Bivariate matrix multiplication and ring forests remain staged
-for later PRs. Their layouts, AWS P² fixtures, and benchmark baselines are
+for later PRs. Their layouts, test milestones, and benchmark methodology are
 documented in `tests/ring_api_proposal.md` and
-`tests/fixtures/aws_ring/README.md`. Run `make bench-ring` to print the
-baseline comparisons against the scalar ring adapter and integer block
-embedding.
+`tests/fixtures/aws_ring/README.md`. Run `make bench-ring` to print per-case
+comparisons against the scalar ring adapter and integer block embedding
+baselines.

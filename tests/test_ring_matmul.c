@@ -6,7 +6,7 @@
 
 int main(void)
 {
-    puts("DISABLED ring matrix tests: activate with ring matmul PRs 2-4");
+    puts("DISABLED ring matrix tests: activate with ring matmul PRs 3-5");
     return 0;
 }
 
@@ -238,7 +238,7 @@ static void expect_token(FILE *input, const char *expected)
 {
     char token[256];
     if (fscanf(input, "%255s", token) != 1 || strcmp(token, expected) != 0) {
-        fprintf(stderr, "AWS ring fixture: expected %s\n", expected);
+        fprintf(stderr, "captured ring fixture: expected %s\n", expected);
         abort();
     }
 }
@@ -252,8 +252,8 @@ static void read_values(FILE *input, mpz_t *values, size_t count)
     }
 }
 
-static void test_aws_block_equivalence(mpz_t *A, mpz_t *B,
-                                       mpz_t *expected, int dim)
+static void test_hyperelliptic_block_equivalence(mpz_t *A, mpz_t *B,
+                                                 mpz_t *expected, int dim)
 {
     size_t cells = (size_t)dim * (size_t)dim;
     size_t block_cells = 4 * cells;
@@ -295,7 +295,7 @@ static void test_aws_block_equivalence(mpz_t *A, mpz_t *B,
                 mpz_cmp(product[top_right], expected[cells + expected_index]) != 0 ||
                 mpz_sgn(product[bottom_left]) != 0 ||
                 mpz_cmp(product[bottom_right], expected[expected_index]) != 0) {
-                fputs("AWS P^2 product disagreed with integer block embedding\n",
+                fputs("captured P^2 product disagreed with integer block embedding\n",
                       stderr);
                 abort();
             }
@@ -307,7 +307,7 @@ static void test_aws_block_equivalence(mpz_t *A, mpz_t *B,
     clear_values(product, block_cells);
 }
 
-static void test_aws_products(const char *path)
+static void test_captured_products(const char *path)
 {
     FILE *input = fopen(path, "r");
     char token[256];
@@ -369,10 +369,10 @@ static void test_aws_products(const char *path)
         mpz_init(work);
         mpz_rmatrix_mult_p2(C, A, dim, B, dim, work);
         if (!equal_values(C, expected, 2 * count)) {
-            fprintf(stderr, "AWS P^2 exact product mismatch: %s\n", token);
+            fprintf(stderr, "captured P^2 exact product mismatch: %s\n", token);
             abort();
         }
-        test_aws_block_equivalence(A, B, expected, dim);
+        test_hyperelliptic_block_equivalence(A, B, expected, dim);
         mpz_clear(work);
         clear_values(A, 2 * count);
         clear_values(B, 2 * count);
@@ -836,11 +836,11 @@ static void test_bivariate_box_corner(void)
 
 int main(int argc, char **argv)
 {
-    const char *aws_fixture = argc > 1 ? argv[1]
+    const char *captured_fixture = argc > 1 ? argv[1]
         : "tests/fixtures/aws_ring/p2_aws_products.txt";
     hw_disable_fft = 0;
     hw_mpz_setup();
-    test_aws_products(aws_fixture);
+    test_captured_products(captured_fixture);
     /* Base matrix API forbids C overlapping A or B; this ring API keeps that contract. */
     run_case("p2-signed-dense-rectangular", 2, 1, 2, 3, 0, 0);
     run_case("p2-sparse", 2, 1, 1, 4, 1, 0);
@@ -875,7 +875,7 @@ int main(int argc, char **argv)
     test_bivariate_box_corner();
     test_shared_fourier_pnq_dispatch();
 #else
-    puts("DISABLED bivariate ring matrix tests: activate in PR 4");
+    puts("DISABLED bivariate ring matrix tests: activate in PR 5");
 #endif
     puts("PASS ring matrix API exact references");
     hw_mpz_clear();
