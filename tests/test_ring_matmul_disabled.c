@@ -156,7 +156,7 @@ static void expect_token(FILE *input, const char *expected)
 {
     char token[256];
     if (fscanf(input, "%255s", token) != 1 || strcmp(token, expected) != 0) {
-        fprintf(stderr, "AWS ring fixture: expected %s\n", expected);
+        fprintf(stderr, "captured ring fixture: expected %s\n", expected);
         abort();
     }
 }
@@ -170,7 +170,7 @@ static void read_values(FILE *input, mpz_t *values, size_t count)
     }
 }
 
-static void test_aws_products(const char *path)
+static void test_captured_products(const char *path)
 {
     FILE *input = fopen(path, "r");
     char token[256];
@@ -232,7 +232,7 @@ static void test_aws_products(const char *path)
         mpz_init(work);
         mpz_rmatrix_mult_p2(C, A, dim, B, dim, work);
         if (!equal_values(C, expected, 2 * count)) {
-            fprintf(stderr, "AWS P^2 exact product mismatch: %s\n", token);
+            fprintf(stderr, "captured P^2 exact product mismatch: %s\n", token);
             abort();
         }
         mpz_clear(work);
@@ -323,9 +323,9 @@ static void test_bivariate_box_corner(void)
 
 int main(int argc, char **argv)
 {
-    const char *aws_fixture = argc > 1 ? argv[1]
+    const char *captured_fixture = argc > 1 ? argv[1]
         : "tests/fixtures/aws_ring/p2_aws_products.txt";
-    test_aws_products(aws_fixture);
+    test_captured_products(captured_fixture);
     /* Base matrix API forbids C overlapping A or B; this ring API keeps that contract. */
     run_case("p2-signed-dense-rectangular", 2, 1, 2, 3, 0, 0);
     run_case("p2-sparse", 2, 1, 1, 4, 1, 0);

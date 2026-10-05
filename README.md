@@ -25,9 +25,14 @@ uses C, GMP, and the checked-in fixture files; Sage, Python, and zeta data are
 not needed at test runtime. Fixture provenance and the text schema are
 documented in `tests/fixtures/aws/README.md`.
 
+> **Upstream cleanup required:** This PR-stack status and its linked planning
+> and benchmark documents must be rewritten for upstream or removed before
+> merging into upstream rforest. Update or remove this README section at the
+> same time.
+
 The ring matmul and forest APIs are staged for later PRs. `make test` reports
 their guarded native C/GMP suites as disabled until those APIs land. Their
-planned layouts, activation points, exact AWS P² products, and benchmark
+planned layouts, activation points, captured Sage P² products, and benchmark
 baselines are documented in `tests/ring_api_proposal.md` and
 `tests/fixtures/aws_ring/README.md`. Run `make bench-ring` to print the
 per-case comparisons against the scalar ring adapter and integer block

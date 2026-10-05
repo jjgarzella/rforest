@@ -67,6 +67,9 @@ bench-ring: bench_ring_baselines
 tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
+tests/test_hyperelliptic_fixtures.o: tests/test_hyperelliptic_fixtures.c rforest.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
 tests/test_ring_matmul_disabled.o: tests/test_ring_matmul_disabled.c
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 

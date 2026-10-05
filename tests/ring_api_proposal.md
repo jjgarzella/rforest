@@ -1,5 +1,8 @@
 # Ring matrix and forest API proposal
 
+> **Temporary PR-stack document:** Rewrite this proposal as final upstream API
+> documentation or remove it before merging the work into upstream rforest.
+
 This proposal keeps the existing `mpz_rmatrix_mult` and `rforest` interfaces
 unchanged. Ring coefficients are exact GMP integers; a ring product is not
 reduced modulo an integer unless a forest endpoint requests a modulus.
@@ -58,7 +61,7 @@ selects the same classical fallback behavior as the integer matrix API.
 
 ## Disabled test milestones
 
-`make test` keeps the original AWS forest suite enabled and prints explicit
+`make test` keeps the original hyperelliptic forest suite enabled and prints explicit
 disabled status for the new ring tests. The guarded C/GMP test bodies are
 activated as their APIs land:
 
@@ -75,7 +78,7 @@ activated as their APIs land:
    ring reference, with the transition polynomial `x` kept separate from P/Q,
    rectangular initial `V`, exclusive endpoints, three `kappa` values,
    coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
-   also gets block-embedding equivalence cases based on the captured AWS forest
+   also gets block-embedding equivalence cases based on the captured hyperelliptic forest
    fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
    come from direct GMP loops rather than a production backend.
 
