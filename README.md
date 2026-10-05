@@ -26,6 +26,11 @@ documented in `tests/fixtures/aws/README.md`.
 
 ## Ring matrix forests
 
+> **Upstream cleanup required:** This PR-stack status and its linked planning
+> and benchmark documents must be rewritten for upstream or removed before
+> merging into upstream rforest. Update or remove this README section at the
+> same time.
+
 The public `rforest_p2`, `rforest_pn`, and `rforest_pnq` APIs run the existing
 remainder forest over `Z[P]/(P^2)`, `Z[P]/(P^n)`, and
 `Z[P,Q]/(P^N,Q^N)`. The polynomial variable `x` used to evaluate transition

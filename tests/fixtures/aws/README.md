@@ -1,5 +1,9 @@
 # AWS-derived remainder forest fixtures
 
+> **Upstream cleanup required:** These source-specific fixture notes and the
+> accompanying `capture_aws_fixtures.sage` must be rewritten for upstream-ready
+> provenance or removed before merging this test material into upstream rforest.
+
 These fixtures preserve calls made by the existing Sage implementation in
 AWS-2026, along with every expected matrix returned for its ordered prime
 indices. They are plain decimal text so a C reader can parse them with standard

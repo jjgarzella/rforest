@@ -1,5 +1,9 @@
 # Ring matrix and forest API
 
+> **Upstream cleanup required:** Reconcile this PR-stack API documentation
+> with the final upstream documentation or remove it before merging into
+> upstream rforest.
+
 These APIs keep the existing `mpz_rmatrix_mult` and `rforest` interfaces
 unchanged. Ring coefficients are exact GMP integers; a ring product is not
 reduced modulo an integer unless a forest endpoint requests a modulus.
@@ -58,9 +62,9 @@ selects the same classical fallback behavior as the integer matrix API.
 
 ## Enabled tests
 
-`make test` runs the original AWS forest suite and all ring tests:
+`make test` runs the hyperelliptic forest suite and all ring tests:
 
-1. P² matmul tests check the exact AWS source products in
+1. P² matmul tests check the exact captured Sage products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
@@ -73,10 +77,11 @@ selects the same classical fallback behavior as the integer matrix API.
    the transition polynomial `x` kept separate from P/Q, rectangular initial
    `V`, exclusive endpoints, three `kappa` values, coefficientwise residues,
    final `z`, final `V`, and immutable inputs. P² also gets block-embedding
-   equivalence cases, and the fixture runner converts each captured AWS block
-   fixture in `tests/fixtures/aws/` to P² and compares every full output matrix
-   and final state. General P^n and bivariate expected values come from direct
-   GMP loops rather than a production backend. All families are repeated with
+   equivalence cases, and the fixture runner converts each captured AWS-derived
+   hyperelliptic forest block fixture in `tests/fixtures/aws/` to P² and
+   compares every full output matrix and final state. General P^n and bivariate
+   expected values come from direct GMP loops rather than a production backend.
+   All families are repeated with
    `hw_disable_fft` to exercise the classical paths.
 
 The P², P^n, and bivariate multiplication facades and their constructed exact

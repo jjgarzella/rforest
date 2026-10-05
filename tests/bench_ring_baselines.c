@@ -26,7 +26,7 @@ typedef struct {
     size_t coefficient_count;
     mpz_t *left;
     mpz_t *right;
-    mpz_t *aws_expected;
+    mpz_t *captured_expected;
 } ring_case;
 
 static const unsigned warmup_count = 2;
@@ -154,8 +154,8 @@ static void clear_case(ring_case *test)
     mpz_array_clear(test->left, test->coefficient_count * cells);
     mpz_array_clear(test->right, test->coefficient_count * (size_t)test->dim *
                                     (size_t)test->dim);
-    mpz_array_clear(test->aws_expected,
-                    test->aws_expected ? 2 * cells : 0);
+    mpz_array_clear(test->captured_expected,
+                    test->captured_expected ? 2 * cells : 0);
     memset(test, 0, sizeof(*test));
 }
 
@@ -416,13 +416,13 @@ static void read_mpz_values(FILE *input, mpz_t *values, size_t count)
     char word[4096];
     for (size_t i = 0; i < count; i++) {
         if (fscanf(input, "%4095s", word) != 1 || mpz_set_str(values[i], word, 10)) {
-            fputs("ring baseline: malformed AWS integer fixture\n", stderr);
+            fputs("ring baseline: malformed captured Sage integer fixture\n", stderr);
             exit(EXIT_FAILURE);
         }
     }
 }
 
-static void read_aws_cases(const char *path, ring_case **cases_out, size_t *count_out)
+static void read_captured_cases(const char *path, ring_case **cases_out, size_t *count_out)
 {
     FILE *input = fopen(path, "r");
     ring_case *cases;
@@ -470,7 +470,7 @@ static void read_aws_cases(const char *path, ring_case **cases_out, size_t *coun
         cases[i] = make_case(case_id, RING_UNIVARIATE, 2, dim, dim, 0, 0,
                              (unsigned long)i + 1);
         cells = (size_t)dim * (size_t)dim;
-        cases[i].aws_expected = mpz_array_new(2 * cells);
+        cases[i].captured_expected = mpz_array_new(2 * cells);
         for (int coefficient = 0; coefficient < 2; coefficient++) {
             expect_word(input, coefficient == 0 ? "A0" : "A1");
             read_mpz_values(input, cases[i].left + (size_t)coefficient * cells, cells);
@@ -482,14 +482,14 @@ static void read_aws_cases(const char *path, ring_case **cases_out, size_t *coun
         for (int coefficient = 0; coefficient < 2; coefficient++) {
             expect_word(input, coefficient == 0 ? "C0" : "C1");
             read_mpz_values(input,
-                            cases[i].aws_expected + (size_t)coefficient * cells,
+                            cases[i].captured_expected + (size_t)coefficient * cells,
                             cells);
         }
         expect_word(input, "END_CASE");
     }
     expect_word(input, "END");
     if (fscanf(input, "%255s", ignored) == 1) {
-        fputs("ring baseline: trailing AWS fixture content\n", stderr);
+        fputs("ring baseline: trailing captured Sage fixture content\n", stderr);
         exit(EXIT_FAILURE);
     }
     fclose(input);
@@ -603,9 +603,9 @@ static void run_case(ring_case *test)
     double speedup;
 
     reference_product(test, expected);
-    if (test->aws_expected &&
-        !equal_results(expected, test->aws_expected, result_count))
-        fail_case(test, "independent exact reference vs AWS output");
+    if (test->captured_expected &&
+        !equal_results(expected, test->captured_expected, result_count))
+        fail_case(test, "direct GMP reference vs captured Sage output");
     adapter_product(test, adapter);
     block_product(test, block);
     if (!equal_results(expected, adapter, result_count))
@@ -644,9 +644,9 @@ static void run_p2_case(ring_case *test)
     uint64_t optimized_median, optimized_mad;
 
     reference_product(test, expected);
-    if (test->aws_expected &&
-        !equal_results(expected, test->aws_expected, result_count))
-        fail_case(test, "independent exact reference vs AWS output");
+    if (test->captured_expected &&
+        !equal_results(expected, test->captured_expected, result_count))
+        fail_case(test, "direct GMP reference vs captured Sage output");
     adapter_product(test, adapter);
     block_product(test, block);
     p2_product(test, optimized);
@@ -690,9 +690,9 @@ static void run_pn_case(ring_case *test)
     const char *ring_name = test->truncation == 2 ? "P2" : "PN";
 
     reference_product(test, expected);
-    if (test->aws_expected &&
-        !equal_results(expected, test->aws_expected, result_count))
-        fail_case(test, "independent exact reference vs AWS output");
+    if (test->captured_expected &&
+        !equal_results(expected, test->captured_expected, result_count))
+        fail_case(test, "direct GMP reference vs captured Sage output");
     adapter_product(test, adapter);
     block_product(test, block);
     pn_product(test, optimized);
@@ -796,8 +796,8 @@ static void run_pnq_grid_case(const char *name, int truncation, int rows,
 
 int main(int argc, char **argv)
 {
-    ring_case *aws_cases;
-    size_t aws_count;
+    ring_case *captured_cases;
+    size_t captured_count;
     unsigned long seed = 1000;
     int p2_optimized = argc == 3 && strcmp(argv[2], "--p2-optimized") == 0;
     int pn_optimized = argc == 3 && strcmp(argv[2], "--pn-optimized") == 0;
@@ -810,13 +810,13 @@ int main(int argc, char **argv)
     }
     hw_disable_fft = 0;
     hw_mpz_setup();
-    read_aws_cases(argv[1], &aws_cases, &aws_count);
+    read_captured_cases(argv[1], &captured_cases, &captured_count);
     if (pnq_optimized) {
         /* Match the frozen default grid's deterministic bivariate inputs. */
-        for (size_t i = 0; i < aws_count; i++)
-            clear_case(&aws_cases[i]);
-        free(aws_cases);
-        seed += (unsigned long)aws_count + 16 + 48;
+        for (size_t i = 0; i < captured_count; i++)
+            clear_case(&captured_cases[i]);
+        free(captured_cases);
+        seed += (unsigned long)captured_count + 16 + 48;
         puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,pnq_median_ns,pnq_MAD_ns,pnq_over_adapter,pnq_over_block");
         for (int truncation_index = 0; truncation_index < 3;
              truncation_index++) {
@@ -849,16 +849,16 @@ int main(int argc, char **argv)
         puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,pn_median_ns,pn_MAD_ns,pn_over_adapter,pn_over_block");
     else
         puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,adapter_over_block");
-    for (size_t i = 0; i < aws_count; i++) {
+    for (size_t i = 0; i < captured_count; i++) {
         if (p2_optimized)
-            run_p2_case(&aws_cases[i]);
+            run_p2_case(&captured_cases[i]);
         else if (pn_optimized)
-            run_pn_case(&aws_cases[i]);
+            run_pn_case(&captured_cases[i]);
         else
-            run_case(&aws_cases[i]);
-        clear_case(&aws_cases[i]);
+            run_case(&captured_cases[i]);
+        clear_case(&captured_cases[i]);
     }
-    free(aws_cases);
+    free(captured_cases);
 
     for (int dim_index = 0; dim_index < 2; dim_index++) {
         int dim = dim_index == 0 ? 2 : 8;

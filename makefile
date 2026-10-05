@@ -13,7 +13,7 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
-TEST_PROGRAMS = test_rforest_fixtures test_ring_matmul test_ring_forest
+TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul test_ring_forest
 BENCH_PROGRAMS = bench_ring_baselines bench_ring_forest
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
@@ -48,7 +48,7 @@ librforest.a: $(OBJECTS)
 test_rforest: test_rforest.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
-test_rforest_fixtures: tests/test_rforest_fixtures.o librforest.a rforest.h
+test_hyperelliptic_fixtures: tests/test_hyperelliptic_fixtures.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) $(FIXTURE_LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
 test_ring_matmul: tests/test_ring_matmul.o librforest.a
@@ -73,7 +73,7 @@ bench-ring-pnq: bench_ring_baselines
 bench-ring-forest: bench_ring_forest
 	./bench_ring_forest
 
-tests/test_rforest_fixtures.o: tests/test_rforest_fixtures.c rforest.h
+tests/test_hyperelliptic_fixtures.o: tests/test_hyperelliptic_fixtures.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
 tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
@@ -88,11 +88,11 @@ tests/test_ring_matmul.o: tests/test_ring_matmul.c
 tests/test_ring_forest.o: tests/test_ring_forest.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
-test: test_rforest_fixtures test_ring_matmul test_ring_forest
-	./test_rforest_fixtures $(FIXTURES)
-	./test_rforest_fixtures --kappa 0 $(KAPPA_FIXTURES)
-	./test_rforest_fixtures --kappa 4 $(KAPPA_FIXTURES)
-	./test_rforest_fixtures --disable-fft $(FIXTURES)
+test: test_hyperelliptic_fixtures test_ring_matmul test_ring_forest
+	./test_hyperelliptic_fixtures $(FIXTURES)
+	./test_hyperelliptic_fixtures --kappa 0 $(KAPPA_FIXTURES)
+	./test_hyperelliptic_fixtures --kappa 4 $(KAPPA_FIXTURES)
+	./test_hyperelliptic_fixtures --disable-fft $(FIXTURES)
 	./test_ring_matmul
 	./test_ring_forest
 
