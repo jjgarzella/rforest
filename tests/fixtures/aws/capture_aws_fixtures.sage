@@ -1,6 +1,9 @@
 #!/usr/bin/env sage
 """Capture small exact fixtures from the pinned AWS Sage implementation.
 
+UPSTREAM CLEANUP REQUIRED: Rewrite or remove this source-specific capture
+script before merging this test material into upstream rforest.
+
 Run from any directory with AWS_SOURCE, ZETA_SUITE, and FIXTURE_DIR set.
 The checked-in AWS test and implementation files are symlinked into a fresh
 scratch layout so their relative Sage load paths resolve without modifying

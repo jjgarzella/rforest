@@ -11,10 +11,11 @@ Algorithm details are described in
 
 ## Native regression tests
 
-Run `make test` (or `make check`) to build the native fixture runner and replay
-all captured AWS cases in `tests/fixtures/aws/*.rf`. The command also replays
-the four small p=41 cases with `kappa=0` (tree regime) and `kappa=4` (sequential
-regime), then replays every case with `hw_disable_fft` enabled. Each fixture
+Run `make test` (or `make check`) to build the native hyperelliptic fixture
+runner and replay all captured curve cases stored under the source-provenance
+path `tests/fixtures/aws/*.rf`. The command also replays the four small p=41
+cases with `kappa=0` (tree regime) and `kappa=4` (sequential regime), then
+replays every case with `hw_disable_fft` enabled. Each fixture
 replay runs twice from fresh `V` and `z` state, checks every exact output
 residue and the final `z` and `V`, and verifies that the reusable matrix,
 modulus, and endpoint inputs were not changed. The ordinary pass asserts the
