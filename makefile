@@ -13,7 +13,8 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
-TEST_PROGRAMS = test_hyperelliptic_fixtures
+TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled
+BENCH_PROGRAMS = bench_ring_baselines
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
 KAPPA_FIXTURES = \
@@ -30,7 +31,7 @@ clean:
 	rm -f *.o
 	rm -f fft62/*.o
 	rm -f tests/*.o
-	rm -f librforest.a $(PROGRAMS) $(TEST_PROGRAMS)
+	rm -f librforest.a $(PROGRAMS) $(TEST_PROGRAMS) $(BENCH_PROGRAMS)
 
 install: all
 	cp -v rforest.h $(INSTALL_ROOT)/include
@@ -50,14 +51,38 @@ test_rforest: test_rforest.o librforest.a rforest.h
 test_hyperelliptic_fixtures: tests/test_hyperelliptic_fixtures.o librforest.a rforest.h
 	$(CC) $(LDFLAGS) $(FIXTURE_LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
+test_ring_matmul_disabled: tests/test_ring_matmul_disabled.o librforest.a
+	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+test_ring_forest_disabled: tests/test_ring_forest_disabled.o librforest.a
+	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+bench_ring_baselines: tests/bench_ring_baselines.o librforest.a hwmpz.h
+	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
+
+.PHONY: bench-ring
+bench-ring: bench_ring_baselines
+	./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt
+
+tests/bench_ring_baselines.o: tests/bench_ring_baselines.c hwmpz.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
 tests/test_hyperelliptic_fixtures.o: tests/test_hyperelliptic_fixtures.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
-test: test_hyperelliptic_fixtures
+tests/test_ring_matmul_disabled.o: tests/test_ring_matmul_disabled.c
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
+tests/test_ring_forest_disabled.o: tests/test_ring_forest_disabled.c
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
+test: test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled
 	./test_hyperelliptic_fixtures $(FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 0 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 4 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --disable-fft $(FIXTURES)
+	./test_ring_matmul_disabled
+	./test_ring_forest_disabled
 
 check: test
 
