@@ -1,5 +1,8 @@
 # Ring matrix and forest API proposal
 
+> **Temporary PR-stack document:** Rewrite this proposal as final upstream API
+> documentation or remove it before merging the work into upstream rforest.
+
 This proposal keeps the existing `mpz_rmatrix_mult` and `rforest` interfaces
 unchanged. Ring coefficients are exact GMP integers; a ring product is not
 reduced modulo an integer unless a forest endpoint requests a modulus.
@@ -56,29 +59,29 @@ separate work array before copying back; ring-specific in-place wrappers can
 follow that pattern if a later caller needs them. The `hw_disable_fft` switch
 selects the same classical fallback behavior as the integer matrix API.
 
-## Disabled test milestones
+## Test milestones
 
-`make test` keeps the original AWS forest suite enabled and prints explicit
-disabled status for the new ring tests. The guarded C/GMP test bodies are
+`make test` keeps the hyperelliptic forest suite enabled and runs the P²
+matmul tests on this branch. The remaining guarded C/GMP test bodies are
 activated as their APIs land:
 
-1. PR 2 enables P² matmul tests and checks the exact P7 source products in
+1. The P² matmul tests check the exact P7 source products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
-2. PR 3 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
+2. PR 4 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
    independent direct coefficient-ring GMP product.
-3. PR 4 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
+3. PR 5 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
    the highest corner and separately exercises overflow in P and Q, which
    distinguishes box truncation from total-degree truncation.
-4. PR 5 enables forest comparisons against a direct sequential coefficient
+4. PR 6 enables forest comparisons against a direct sequential coefficient
    ring reference, with the transition polynomial `x` kept separate from P/Q,
    rectangular initial `V`, exclusive endpoints, three `kappa` values,
    coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
-   also gets block-embedding equivalence cases based on the captured AWS forest
-   fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
+   also gets block-embedding equivalence cases based on the captured
+   hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
    come from direct GMP loops rather than a production backend.
 
-No ring implementation exists on this branch, so the guarded bodies are not
-compiled or claimed to pass yet. The ordinary test command reports this state
-instead of hiding it or attempting to compile against absent APIs.
+P² ring matrix multiplication is implemented on this branch. The P^n,
+bivariate, and ring forest APIs have not landed yet, so their guarded bodies
+remain uncompiled and `make test` reports their disabled state.
