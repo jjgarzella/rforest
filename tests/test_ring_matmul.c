@@ -27,8 +27,8 @@ mpz_t *mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
                            int n, mpz_t w);
 #endif
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
-void mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
-                          int N, mpz_t w);
+mpz_t *mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
+                            int N, mpz_t w);
 #endif
 
 static unsigned observed_forward_transforms;
@@ -170,7 +170,9 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
     mpz_t *B = new_values(right_count);
     mpz_t *C = new_values(output_count);
     mpz_t *expected = new_values(output_count);
-#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+#if defined(RFOREST_ENABLE_P2_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
     mpz_t *saved_A = new_values(left_count);
     mpz_t *saved_B = new_values(right_count);
 #endif
@@ -178,7 +180,9 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
 
     fill_matrix(A, left_count, mode, 2);
     fill_matrix(B, right_count, mode, 7);
-#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+#if defined(RFOREST_ENABLE_P2_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
     mpz_vec_set(saved_A, A, (long)left_count);
     mpz_vec_set(saved_B, B, (long)right_count);
 #endif
@@ -208,7 +212,9 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
         fprintf(stderr, "%s: ring product differs from direct GMP reference\n", name);
         abort();
     }
-#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+#if defined(RFOREST_ENABLE_P2_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
     if (!equal_values(saved_A, A, left_count) ||
         !equal_values(saved_B, B, right_count)) {
         fprintf(stderr, "%s: ring product modified an input coefficient\n", name);
@@ -220,7 +226,9 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
     clear_values(B, right_count);
     clear_values(C, output_count);
     clear_values(expected, output_count);
-#ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
+#if defined(RFOREST_ENABLE_P2_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
     clear_values(saved_A, left_count);
     clear_values(saved_B, right_count);
 #endif
@@ -638,6 +646,164 @@ static void test_shared_fourier_pn_dispatch(void)
 #endif
 
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
+static void test_bivariate_noncommuting_coefficients(void)
+{
+    const int N = 2;
+    const int dim = 2;
+    const size_t count = (size_t)N * (size_t)N * (size_t)dim * (size_t)dim;
+    mpz_t *A = new_values(count);
+    mpz_t *B = new_values(count);
+    mpz_t *C = new_values(count);
+    mpz_t *expected = new_values(count);
+    mpz_t work;
+
+    fill_matrix(A, count, 0, 2);
+    fill_matrix(B, count, 0, 7);
+    mpz_set_ui(A[0], 1);
+    mpz_set_ui(A[1], 2);
+    mpz_set_ui(A[2], 3);
+    mpz_set_ui(A[3], 4);
+    mpz_set_ui(B[0], 0);
+    mpz_set_ui(B[1], 1);
+    mpz_set_ui(B[2], 1);
+    mpz_set_ui(B[3], 0);
+
+    mpz_init(work);
+    reference_product(expected, A, B, dim, dim, N, N, 1);
+    mpz_rmatrix_mult_pnq(C, A, dim, B, dim, N, work);
+    if (!equal_values(C, expected, count) || mpz_cmp_ui(C[0], 2) != 0 ||
+        mpz_cmp_ui(C[1], 1) != 0 || mpz_cmp_ui(C[2], 4) != 0 ||
+        mpz_cmp_ui(C[3], 3) != 0) {
+        fputs("bivariate matrix coefficients were not multiplied in A*B order\n",
+              stderr);
+        abort();
+    }
+    mpz_clear(work);
+    clear_values(A, count);
+    clear_values(B, count);
+    clear_values(C, count);
+    clear_values(expected, count);
+}
+
+static void test_bivariate_input_alias(void)
+{
+    const int N = 2;
+    const int dim = 3;
+    const size_t count = (size_t)N * (size_t)N * (size_t)dim * (size_t)dim;
+    mpz_t *A = new_values(count);
+    mpz_t *saved = new_values(count);
+    mpz_t *C = new_values(count);
+    mpz_t *expected = new_values(count);
+    mpz_t work;
+
+    fill_matrix(A, count, 0, 11);
+    mpz_vec_set(saved, A, (long)count);
+    mpz_init(work);
+    reference_product(expected, A, A, dim, dim, N, N, 1);
+    mpz_rmatrix_mult_pnq(C, A, dim, A, dim, N, work);
+    if (!equal_values(C, expected, count) ||
+        !equal_values(A, saved, count)) {
+        fputs("bivariate multiplication mishandled aliased inputs\n", stderr);
+        abort();
+    }
+    mpz_clear(work);
+    clear_values(A, count);
+    clear_values(saved, count);
+    clear_values(C, count);
+    clear_values(expected, count);
+}
+
+static void test_shared_fourier_pnq_dispatch(void)
+{
+    const int N = 3;
+    const int rows = 8;
+    const int dim = 8;
+    const size_t coefficients = (size_t)N * (size_t)N;
+    const size_t acells = (size_t)rows * (size_t)dim;
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    const size_t left_count = coefficients * acells;
+    const size_t right_count = coefficients * bcells;
+    const size_t input_entries = left_count + right_count;
+    size_t threshold = ((size_t)rows + (size_t)dim) * (size_t)dim *
+                       (size_t)mpz_mat_fft_crossover(dim);
+    size_t active_entries = 2 * (acells + bcells);
+    size_t limbs = threshold / active_entries + 1;
+    mpz_t *A = new_values(left_count);
+    mpz_t *B = new_values(right_count);
+    mpz_t *C = new_values(left_count);
+    mpz_t *expected = new_values(left_count);
+    mpz_t work;
+
+    if (limbs == 0 || limbs > SIZE_MAX / GMP_NUMB_BITS) {
+        fputs("invalid bivariate Fourier dispatch test size\n", stderr);
+        abort();
+    }
+    for (size_t i = 0; i < acells; i++) {
+        mpz_set_ui(A[i], (unsigned long)(i % 31) + 1);
+        mpz_setbit(A[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(A[i], A[i]);
+        mpz_set(A[(coefficients - 1) * acells + i], A[i]);
+
+        mpz_set_ui(B[i], (unsigned long)(i % 29) + 1);
+        mpz_setbit(B[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(B[i], B[i]);
+        mpz_neg(B[(coefficients - 1) * bcells + i], B[i]);
+    }
+
+    mpz_init(work);
+    reference_product(expected, A, B, rows, dim, N, N, 1);
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 0;
+    mpz_rmatrix_mult_pnq(C, A, rows, B, dim, N, work);
+    if (!equal_values(C, expected, left_count)) {
+        fputs("bivariate Fourier result disagreed with direct GMP reference\n",
+              stderr);
+        abort();
+    }
+    for (size_t i = (coefficients - 1) * acells; i < left_count; i++)
+        if (mpz_sgn(C[i]) != 0) {
+            fputs("bivariate signed cancellation coefficient was nonzero\n",
+                  stderr);
+            abort();
+        }
+    {
+        size_t pairs = (size_t)N * (size_t)(N + 1) / 2;
+        if (observed_forward_transforms != input_entries ||
+            observed_inverse_transforms != left_count ||
+            observed_fourier_matrix_products != pairs * pairs) {
+            fprintf(stderr,
+                    "bivariate Fourier reuse counts: forward=%u inverse=%u matrix=%u\n",
+                    observed_forward_transforms, observed_inverse_transforms,
+                    observed_fourier_matrix_products);
+            abort();
+        }
+    }
+
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 1;
+    mpz_rmatrix_mult_pnq(C, A, rows, B, dim, N, work);
+    if (!equal_values(C, expected, left_count) ||
+        observed_forward_transforms != 0 ||
+        observed_inverse_transforms != 0 ||
+        observed_fourier_matrix_products != 0) {
+        fputs("bivariate hw_disable_fft fallback was incorrect or used Fourier transforms\n",
+              stderr);
+        abort();
+    }
+    hw_disable_fft = 0;
+    mpz_clear(work);
+    clear_values(A, left_count);
+    clear_values(B, right_count);
+    clear_values(C, left_count);
+    clear_values(expected, left_count);
+}
+
 static void test_bivariate_box_corner(void)
 {
     mpz_t *A = new_values(9);
@@ -690,8 +856,10 @@ int main(int argc, char **argv)
 #endif
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     run_case("pnq-one", 1, 1, 2, 3, 0, 1);
-    run_case("pnq-two", 2, 2, 2, 3, 1, 1);
+    run_case("pnq-two-signed-sparse", 2, 2, 2, 3, 1, 1);
     run_case("pnq-three-box-and-high-corner", 3, 3, 2, 3, 0, 1);
+    run_case("pnq-three-sparse", 3, 3, 2, 4, 1, 1);
+    run_case("pnq-three-large-signed", 3, 3, 2, 3, 3, 1);
 #endif
     test_p2_order_and_cancellation();
 #ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
@@ -702,7 +870,10 @@ int main(int argc, char **argv)
     test_shared_fourier_pn_dispatch();
 #endif
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
+    test_bivariate_noncommuting_coefficients();
+    test_bivariate_input_alias();
     test_bivariate_box_corner();
+    test_shared_fourier_pnq_dispatch();
 #else
     puts("DISABLED bivariate ring matrix tests: activate in PR 5");
 #endif

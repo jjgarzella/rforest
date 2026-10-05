@@ -61,9 +61,9 @@ selects the same classical fallback behavior as the integer matrix API.
 
 ## Test milestones
 
-`make test` keeps the hyperelliptic forest suite enabled and runs the P² and
-P^n matmul tests on this branch. The remaining guarded C/GMP test bodies are
-activated as their APIs land:
+`make test` keeps the hyperelliptic forest suite enabled and runs the P², P^n,
+and bivariate matmul tests on this branch. The remaining guarded C/GMP test
+bodies are activated as their APIs land:
 
 1. The P² matmul tests check the exact P7 source products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
@@ -79,9 +79,13 @@ activated as their APIs land:
    rectangular initial `V`, exclusive endpoints, three `kappa` values,
    coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
    also gets block-embedding equivalence cases based on the captured
-   hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
-   come from direct GMP loops rather than a production backend.
+   hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and
+   bivariate expected values come from direct GMP loops rather than a
+   production backend.
 
-P² and P^n ring matrix multiplication are implemented on this branch, and
-their tests run. Bivariate and ring forest APIs have not landed yet, so their
-guarded bodies remain uncompiled and `make test` reports their disabled state.
+The P², P^n, and bivariate multiplication facades and their constructed exact
+references are enabled together on this branch. The test also checks
+that each coefficient entry is transformed once, every truncated Fourier-side
+matrix product is counted, each output is reconstructed once, aliased input
+pointers remain valid, and `hw_disable_fft` takes the exact classical path.
+Forest tests remain disabled until the final forest integration stage.
