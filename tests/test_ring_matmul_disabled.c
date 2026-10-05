@@ -4,7 +4,7 @@
 
 int main(void)
 {
-    puts("DISABLED ring matrix tests: activate with ring matmul PRs 2-4");
+    puts("DISABLED ring matrix tests: activate with ring matmul PRs 3-5");
     return 0;
 }
 

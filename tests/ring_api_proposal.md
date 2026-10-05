@@ -61,20 +61,20 @@ selects the same classical fallback behavior as the integer matrix API.
 
 ## Disabled test milestones
 
-`make test` keeps the original hyperelliptic forest suite enabled and prints explicit
+`make test` keeps the hyperelliptic forest suite enabled and prints explicit
 disabled status for the new ring tests. The guarded C/GMP test bodies are
 activated as their APIs land:
 
-1. PR 2 enables P² matmul tests and checks the exact P7 source products in
+1. PR 3 enables P² matmul tests and checks the exact P7 source products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
-2. PR 3 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
+2. PR 4 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
    independent direct coefficient-ring GMP product.
-3. PR 4 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
+3. PR 5 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
    the highest corner and separately exercises overflow in P and Q, which
    distinguishes box truncation from total-degree truncation.
-4. PR 5 enables forest comparisons against a direct sequential coefficient
+4. PR 6 enables forest comparisons against a direct sequential coefficient
    ring reference, with the transition polynomial `x` kept separate from P/Q,
    rectangular initial `V`, exclusive endpoints, three `kappa` values,
    coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
