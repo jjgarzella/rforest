@@ -30,7 +30,8 @@ typedef struct {
 } ring_case;
 
 static const unsigned warmup_count = 2;
-static const unsigned repeat_count = 9;
+static const unsigned repeat_count = 27;
+static const unsigned sample_batch_count = 16;
 
 static mpz_t *mpz_array_new(size_t count)
 {
@@ -263,6 +264,20 @@ static void p2_product(const ring_case *test, mpz_t *result)
     mpz_clear(work);
 }
 
+static void pn_product(const ring_case *test, mpz_t *result)
+{
+    mpz_t work;
+
+    if (test->kind != RING_UNIVARIATE) {
+        fputs("ring P^n benchmark: received a bivariate case\n", stderr);
+        exit(EXIT_FAILURE);
+    }
+    mpz_init(work);
+    mpz_rmatrix_mult_pn(result, test->left, test->rows, test->right,
+                        test->dim, test->truncation, work);
+    mpz_clear(work);
+}
+
 static void block_product(const ring_case *test, mpz_t *result)
 {
     const int n = test->truncation;
@@ -488,27 +503,28 @@ static int compare_u64(const void *left, const void *right)
 
 typedef void (*product_function)(const ring_case *, mpz_t *);
 
-static void measure(product_function product, const ring_case *test,
-                    uint64_t *median, uint64_t *mad)
+static void run_product_once(product_function product, const ring_case *test,
+                             size_t count)
 {
-    const size_t count = test->coefficient_count * matrix_cells(test);
-    uint64_t samples[repeat_count];
-    uint64_t deviations[repeat_count];
-    mpz_t *result;
+    mpz_t *result = mpz_array_new(count);
+    product(test, result);
+    mpz_array_clear(result, count);
+}
 
-    for (unsigned i = 0; i < warmup_count; i++) {
-        result = mpz_array_new(count);
-        product(test, result);
-        mpz_array_clear(result, count);
-    }
-    for (unsigned i = 0; i < repeat_count; i++) {
-        uint64_t start;
-        start = now_ns();
-        result = mpz_array_new(count);
-        product(test, result);
-        samples[i] = now_ns() - start;
-        mpz_array_clear(result, count);
-    }
+static uint64_t time_product_batch(product_function product,
+                                   const ring_case *test, size_t count)
+{
+    uint64_t start = now_ns();
+    for (unsigned i = 0; i < sample_batch_count; i++)
+        run_product_once(product, test, count);
+    return (now_ns() - start) / sample_batch_count;
+}
+
+static void summarize_samples(uint64_t *samples, uint64_t *median,
+                              uint64_t *mad)
+{
+    uint64_t deviations[repeat_count];
+
     qsort(samples, repeat_count, sizeof(samples[0]), compare_u64);
     *median = samples[repeat_count / 2];
     for (unsigned i = 0; i < repeat_count; i++)
@@ -516,6 +532,48 @@ static void measure(product_function product, const ring_case *test,
                                              : *median - samples[i];
     qsort(deviations, repeat_count, sizeof(deviations[0]), compare_u64);
     *mad = deviations[repeat_count / 2];
+}
+
+static void measure(product_function product, const ring_case *test,
+                    uint64_t *median, uint64_t *mad)
+{
+    const size_t count = test->coefficient_count * matrix_cells(test);
+    uint64_t samples[repeat_count];
+
+    for (unsigned i = 0; i < warmup_count; i++)
+        for (unsigned j = 0; j < sample_batch_count; j++)
+            run_product_once(product, test, count);
+    for (unsigned i = 0; i < repeat_count; i++)
+        samples[i] = time_product_batch(product, test, count);
+    summarize_samples(samples, median, mad);
+}
+
+static void measure_paired(product_function adapter, product_function block,
+                           product_function native, const ring_case *test,
+                           uint64_t *adapter_median, uint64_t *adapter_mad,
+                           uint64_t *block_median, uint64_t *block_mad,
+                           uint64_t *native_median, uint64_t *native_mad)
+{
+    const size_t count = test->coefficient_count * matrix_cells(test);
+    product_function products[3] = {adapter, block, native};
+    uint64_t samples[3][repeat_count];
+
+    for (unsigned i = 0; i < warmup_count; i++) {
+        for (unsigned algorithm = 0; algorithm < 3; algorithm++) {
+            for (unsigned j = 0; j < sample_batch_count; j++)
+                run_product_once(products[algorithm], test, count);
+        }
+    }
+    for (unsigned repeat = 0; repeat < repeat_count; repeat++) {
+        for (unsigned position = 0; position < 3; position++) {
+            unsigned algorithm = (repeat + position) % 3;
+            samples[algorithm][repeat] = time_product_batch(
+                products[algorithm], test, count);
+        }
+    }
+    summarize_samples(samples[0], adapter_median, adapter_mad);
+    summarize_samples(samples[1], block_median, block_mad);
+    summarize_samples(samples[2], native_median, native_mad);
 }
 
 static void run_case(ring_case *test)
@@ -605,12 +663,62 @@ static void run_p2_case(ring_case *test)
     mpz_array_clear(optimized, result_count);
 }
 
+static void run_pn_case(ring_case *test)
+{
+    const size_t result_count = test->coefficient_count * matrix_cells(test);
+    mpz_t *expected = mpz_array_new(result_count);
+    mpz_t *adapter = mpz_array_new(result_count);
+    mpz_t *block = mpz_array_new(result_count);
+    mpz_t *optimized = mpz_array_new(result_count);
+    uint64_t adapter_median, adapter_mad;
+    uint64_t block_median, block_mad;
+    uint64_t optimized_median, optimized_mad;
+    const char *ring_name = test->truncation == 2 ? "P2" : "PN";
+
+    reference_product(test, expected);
+    if (test->captured_expected &&
+        !equal_results(expected, test->captured_expected, result_count))
+        fail_case(test, "direct GMP reference vs captured Sage output");
+    adapter_product(test, adapter);
+    block_product(test, block);
+    pn_product(test, optimized);
+    if (!equal_results(expected, adapter, result_count))
+        fail_case(test, "classical ring adapter vs direct reference");
+    if (!equal_results(expected, block, result_count))
+        fail_case(test, "integer block embedding vs direct reference");
+    if (!equal_results(expected, optimized, result_count))
+        fail_case(test, "P^n implementation vs direct reference");
+
+    measure_paired(adapter_product, block_product, pn_product, test,
+                   &adapter_median, &adapter_mad,
+                   &block_median, &block_mad,
+                   &optimized_median, &optimized_mad);
+    printf("%s,%s,%d,%d,%d,%u,%s,%llu,%llu,%llu,%llu,%llu,%llu,%.3f,%.3f\n",
+           test->name, ring_name, test->truncation, test->rows, test->dim,
+           test->bits, test->sparse ? "sparse" : "dense",
+           (unsigned long long)adapter_median,
+           (unsigned long long)adapter_mad,
+           (unsigned long long)block_median,
+           (unsigned long long)block_mad,
+           (unsigned long long)optimized_median,
+           (unsigned long long)optimized_mad,
+           adapter_median ? (double)optimized_median / adapter_median : 0.0,
+           block_median ? (double)optimized_median / block_median : 0.0);
+    mpz_array_clear(expected, result_count);
+    mpz_array_clear(adapter, result_count);
+    mpz_array_clear(block, result_count);
+    mpz_array_clear(optimized, result_count);
+}
+
 static void run_grid_case(const char *name, enum ring_kind kind, int truncation,
                           int rows, int dim, unsigned bits, int sparse,
-                          unsigned long seed)
+                          unsigned long seed, int pn_optimized)
 {
     ring_case test = make_case(name, kind, truncation, rows, dim, bits, sparse, seed);
-    run_case(&test);
+    if (pn_optimized)
+        run_pn_case(&test);
+    else
+        run_case(&test);
     clear_case(&test);
 }
 
@@ -620,9 +728,10 @@ int main(int argc, char **argv)
     size_t captured_count;
     unsigned long seed = 1000;
     int p2_optimized = argc == 3 && strcmp(argv[2], "--p2-optimized") == 0;
+    int pn_optimized = argc == 3 && strcmp(argv[2], "--pn-optimized") == 0;
 
-    if (argc != 2 && !p2_optimized) {
-        fprintf(stderr, "usage: %s tests/fixtures/aws_ring/p2_aws_products.txt [--p2-optimized]\n",
+    if (argc != 2 && !p2_optimized && !pn_optimized) {
+        fprintf(stderr, "usage: %s tests/fixtures/aws_ring/p2_aws_products.txt [--p2-optimized|--pn-optimized]\n",
                 argv[0]);
         return EXIT_FAILURE;
     }
@@ -631,11 +740,15 @@ int main(int argc, char **argv)
     read_captured_cases(argv[1], &captured_cases, &captured_count);
     if (p2_optimized)
         puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,p2_median_ns,p2_MAD_ns,p2_over_adapter,p2_over_block");
+    else if (pn_optimized)
+        puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,pn_median_ns,pn_MAD_ns,pn_over_adapter,pn_over_block");
     else
         puts("case,ring,truncation,rows,dim,bits,density,adapter_median_ns,adapter_MAD_ns,block_median_ns,block_MAD_ns,adapter_over_block");
     for (size_t i = 0; i < captured_count; i++) {
         if (p2_optimized)
             run_p2_case(&captured_cases[i]);
+        else if (pn_optimized)
+            run_pn_case(&captured_cases[i]);
         else
             run_case(&captured_cases[i]);
         clear_case(&captured_cases[i]);
@@ -656,6 +769,8 @@ int main(int argc, char **argv)
                                                rows, dim, bits, sparse, seed++);
                     if (p2_optimized)
                         run_p2_case(&test);
+                    else if (pn_optimized)
+                        run_pn_case(&test);
                     else
                         run_case(&test);
                     clear_case(&test);
@@ -680,13 +795,14 @@ int main(int argc, char **argv)
                                  truncation, dim, rows, bits,
                                  sparse ? "sparse" : "dense");
                         run_grid_case(name, RING_UNIVARIATE, truncation, rows,
-                                      dim, bits, sparse, seed++);
+                                      dim, bits, sparse, seed++, pn_optimized);
                     }
                 }
             }
         }
     }
 
+    if (!pn_optimized) {
     for (int truncation_index = 0; truncation_index < 3; truncation_index++) {
         int truncation = truncation_index + 1;
         for (int dim_index = 0; dim_index < 2; dim_index++) {
@@ -701,11 +817,12 @@ int main(int argc, char **argv)
                                  truncation, dim, rows, bits,
                                  sparse ? "sparse" : "dense");
                         run_grid_case(name, RING_BIVARIATE, truncation, rows,
-                                      dim, bits, sparse, seed++);
+                                      dim, bits, sparse, seed++, 0);
                     }
                 }
             }
         }
+    }
     }
     }
     hw_mpz_clear();

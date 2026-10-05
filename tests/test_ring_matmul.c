@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #if !defined(RFOREST_ENABLE_P2_MATMUL_TESTS) && \
+    !defined(RFOREST_ENABLE_PN_MATMUL_TESTS) && \
     !defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
 
 int main(void)
@@ -20,9 +21,12 @@ int main(void)
 #include "mpzfft.h"
 
 /* Proposed coefficient-major API; see ring_api_proposal.md. */
+#if defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
+mpz_t *mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
+                           int n, mpz_t w);
+#endif
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
-void mpz_rmatrix_mult_pn(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
-                         int n, mpz_t w);
 void mpz_rmatrix_mult_pnq(mpz_t *C, mpz_t *A, int r, mpz_t *B, int d,
                           int N, mpz_t w);
 #endif
@@ -180,13 +184,18 @@ static void run_case(const char *name, int np, int nq, int rows, int dim,
 #endif
     mpz_init(work);
     reference_product(expected, A, B, rows, dim, np, nq, bivariate);
+#if defined(RFOREST_ENABLE_PN_MATMUL_TESTS) || \
+    defined(RFOREST_ENABLE_RING_MATMUL_TESTS)
+    if (bivariate) {
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
-    if (bivariate)
         mpz_rmatrix_mult_pnq(C, A, rows, B, dim, np, work);
-    else if (np == 2)
-        mpz_rmatrix_mult_p2(C, A, rows, B, dim, work);
-    else
+#else
+        fputs("bivariate test is not enabled in this stage\n", stderr);
+        abort();
+#endif
+    } else {
         mpz_rmatrix_mult_pn(C, A, rows, B, dim, np, work);
+    }
 #else
     if (bivariate || np != 2) {
         fputs("P^2 test requested a ring family not enabled in this stage\n",
@@ -490,6 +499,144 @@ static void test_shared_fourier_dispatch(void)
 }
 #endif
 
+#ifdef RFOREST_ENABLE_PN_MATMUL_TESTS
+static void test_pn_compatibility(void)
+{
+    const int rows = 2;
+    const int dim = 3;
+    const size_t acells = (size_t)rows * (size_t)dim;
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    mpz_t *A1 = new_values(acells);
+    mpz_t *B1 = new_values(bcells);
+    mpz_t *pn1 = new_values(acells);
+    mpz_t *integer = new_values(acells);
+    mpz_t *A2 = new_values(2 * acells);
+    mpz_t *B2 = new_values(2 * bcells);
+    mpz_t *pn2 = new_values(2 * acells);
+    mpz_t *specialized = new_values(2 * acells);
+    mpz_t work;
+
+    fill_matrix(A1, acells, 0, 3);
+    fill_matrix(B1, bcells, 0, 5);
+    fill_matrix(A2, 2 * acells, 0, 7);
+    fill_matrix(B2, 2 * bcells, 0, 11);
+    mpz_init(work);
+    mpz_rmatrix_mult_pn(pn1, A1, rows, B1, dim, 1, work);
+    mpz_rmatrix_mult(integer, A1, rows, B1, dim, work);
+    if (!equal_values(pn1, integer, acells)) {
+        fputs("P^1 product differed from integer matrix multiplication\n",
+              stderr);
+        abort();
+    }
+    mpz_rmatrix_mult_pn(pn2, A2, rows, B2, dim, 2, work);
+    mpz_rmatrix_mult_p2(specialized, A2, rows, B2, dim, work);
+    if (!equal_values(pn2, specialized, 2 * acells)) {
+        fputs("P^2 general facade differed from the specialized path\n",
+              stderr);
+        abort();
+    }
+    mpz_clear(work);
+    clear_values(A1, acells);
+    clear_values(B1, bcells);
+    clear_values(pn1, acells);
+    clear_values(integer, acells);
+    clear_values(A2, 2 * acells);
+    clear_values(B2, 2 * bcells);
+    clear_values(pn2, 2 * acells);
+    clear_values(specialized, 2 * acells);
+}
+
+static void test_shared_fourier_pn_dispatch(void)
+{
+    const int n = 3;
+    const int rows = 8;
+    const int dim = 8;
+    const size_t acells = (size_t)rows * (size_t)dim;
+    const size_t bcells = (size_t)dim * (size_t)dim;
+    const size_t left_count = (size_t)n * acells;
+    const size_t right_count = (size_t)n * bcells;
+    const size_t input_entries = left_count + right_count;
+    size_t threshold = ((size_t)rows + (size_t)dim) * (size_t)dim *
+                       (size_t)mpz_mat_fft_crossover(dim);
+    size_t limbs = threshold / input_entries + 1;
+    mpz_t *A = new_values(left_count);
+    mpz_t *B = new_values(right_count);
+    mpz_t *C = new_values(left_count);
+    mpz_t *expected = new_values(left_count);
+    mpz_t work;
+
+    if (limbs == 0 || limbs > SIZE_MAX / GMP_NUMB_BITS) {
+        fputs("invalid P^n Fourier dispatch test size\n", stderr);
+        abort();
+    }
+    for (size_t i = 0; i < acells; i++) {
+        mpz_set_ui(A[i], (unsigned long)(i % 31) + 1);
+        mpz_setbit(A[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(A[i], A[i]);
+        mpz_set(A[acells + i], A[i]);
+        mpz_set(A[2 * acells + i], A[i]);
+
+        mpz_set_ui(B[i], (unsigned long)(i % 29) + 1);
+        mpz_setbit(B[i], (mp_bitcnt_t)(limbs * GMP_NUMB_BITS - 1));
+        if (i & 1)
+            mpz_neg(B[i], B[i]);
+        mpz_mul_2exp(B[bcells + i], B[i], 1);
+        mpz_neg(B[bcells + i], B[bcells + i]);
+        mpz_set(B[2 * bcells + i], B[i]);
+    }
+
+    mpz_init(work);
+    reference_product(expected, A, B, rows, dim, n, 1, 0);
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 0;
+    mpz_rmatrix_mult_pn(C, A, rows, B, dim, n, work);
+    if (!equal_values(C, expected, left_count)) {
+        fputs("P^n Fourier result disagreed with direct GMP reference\n",
+              stderr);
+        abort();
+    }
+    for (size_t i = 2 * acells; i < 3 * acells; i++)
+        if (mpz_sgn(C[i]) != 0) {
+            fputs("P^n full signed cancellation coefficient was nonzero\n",
+                  stderr);
+            abort();
+        }
+    if (observed_forward_transforms != input_entries ||
+        observed_inverse_transforms != left_count ||
+        observed_fourier_matrix_products != (unsigned)(n * (n + 1) / 2)) {
+        fprintf(stderr,
+                "P^n Fourier reuse counts: forward=%u inverse=%u matrix=%u\n",
+                observed_forward_transforms, observed_inverse_transforms,
+                observed_fourier_matrix_products);
+        abort();
+    }
+
+    observed_forward_transforms = 0;
+    observed_inverse_transforms = 0;
+    observed_fourier_matrix_products = 0;
+    hw_disable_fft = 1;
+    mpz_rmatrix_mult_pn(C, A, rows, B, dim, n, work);
+    if (!equal_values(C, expected, left_count) ||
+        observed_forward_transforms != 0 ||
+        observed_inverse_transforms != 0 ||
+        observed_fourier_matrix_products != 0) {
+        fputs("P^n hw_disable_fft fallback was incorrect or used Fourier transforms\n",
+              stderr);
+        abort();
+    }
+    hw_disable_fft = 0;
+    mpz_clear(work);
+    clear_values(A, left_count);
+    clear_values(B, right_count);
+    clear_values(C, left_count);
+    clear_values(expected, left_count);
+}
+
+#endif
+
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
 static void test_bivariate_box_corner(void)
 {
@@ -533,10 +680,15 @@ int main(int argc, char **argv)
     run_case("p2-sparse", 2, 1, 1, 4, 1, 0);
     run_case("p2-zero", 2, 1, 2, 3, 2, 0);
     run_case("p2-large", 2, 1, 2, 3, 3, 0);
-#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
+#ifdef RFOREST_ENABLE_PN_MATMUL_TESTS
     run_case("pn-one-is-integer-matmul", 1, 1, 2, 3, 0, 0);
+    run_case("pn-one-unit-dimension-multiple-rows", 1, 1, 2, 1, 0, 0);
+    run_case("pn-two-general-facade", 2, 1, 2, 3, 0, 0);
     run_case("pn-three", 3, 1, 2, 3, 0, 0);
+    run_case("pn-four-large-signed", 4, 1, 2, 3, 3, 0);
     run_case("pn-five-cancellation-shapes", 5, 1, 2, 3, 1, 0);
+#endif
+#ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     run_case("pnq-one", 1, 1, 2, 3, 0, 1);
     run_case("pnq-two", 2, 2, 2, 3, 1, 1);
     run_case("pnq-three-box-and-high-corner", 3, 3, 2, 3, 0, 1);
@@ -545,10 +697,14 @@ int main(int argc, char **argv)
 #ifdef RFOREST_ENABLE_P2_MATMUL_TESTS
     test_shared_fourier_dispatch();
 #endif
+#ifdef RFOREST_ENABLE_PN_MATMUL_TESTS
+    test_pn_compatibility();
+    test_shared_fourier_pn_dispatch();
+#endif
 #ifdef RFOREST_ENABLE_RING_MATMUL_TESTS
     test_bivariate_box_corner();
 #else
-    puts("DISABLED P^n and bivariate ring matrix tests: activate in PRs 4-5");
+    puts("DISABLED bivariate ring matrix tests: activate in PR 5");
 #endif
     puts("PASS ring matrix API exact references");
     hw_mpz_clear();

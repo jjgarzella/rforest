@@ -108,3 +108,55 @@ also verifies that ordinary dispatch observes one forward transform per input
 coefficient entry, three Fourier matrix products, and one inverse transform
 per output coefficient entry, and that `hw_disable_fft` takes the exact
 classical fallback.
+
+## Arbitrary univariate implementation comparison
+
+Reproduce the stage-3 univariate comparison with:
+
+```sh
+make bench_ring_baselines
+./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt \
+  --pn-optimized > /tmp/pn_run_1.csv
+```
+
+The 67 cases include all three captured AWS P² products, the 16 synthetic P²
+cases, and the complete univariate baseline grid for `n=1,3,5`. The native
+facade also uses the existing specialized P² implementation for the P² rows.
+For each case, the command checks the adapter, block embedding, and native
+result against the direct GMP coefficient reference. It then records two
+warmup batches and 27 repeated samples per algorithm. Each sample averages 16
+complete operations, including output allocation. Adapter, block, and native
+algorithms run in a rotating interleaved order. The adapter makes
+`n(n+1)/2` integer matrix calls for an univariate truncation `n`. The original
+nine-sample stage-3 report is preserved in
+`pn_optimized_results_initial.csv`; it used GCC 13.3.0, GMP 6.3.0, Linux
+6.12.76-linuxkit on aarch64, on 2026-10-03.
+
+The initial native/block ratios ranged from 0.088 to 0.671, while
+native/adapter ratios ranged from 0.500 to 1.178. Three dense cases exceeded
+the combined per-run MADs: P² 8x8 at 512 bits, P^5 3x6 at 32 bits, and P^5
+3x6 at 256 bits. To repeat the acceptance follow-up and aggregate three
+independent runs:
+
+```sh
+for run in 1 2 3; do
+  ./bench_ring_baselines tests/fixtures/aws_ring/p2_aws_products.txt \
+    --pn-optimized > "/tmp/pn_run_${run}.csv"
+done
+python3 tests/fixtures/aws_ring/aggregate_pn_benchmarks.py \
+  /tmp/pn_run_1.csv /tmp/pn_run_2.csv /tmp/pn_run_3.csv \
+  > tests/fixtures/aws_ring/pn_optimized_results.csv
+```
+
+The aggregator reports the median of the three process medians and the MAD
+across those process medians for each algorithm, then computes both ratios
+from the aggregated medians. All 67 native case medians beat both baselines:
+native/adapter ranges from 0.319 to 0.976, and native/block from 0.086 to
+0.633. The three follow-up cases have adapter/native medians and across-run
+MADs of 69,216/782 ns and 67,546/765 ns (P², ratio 0.976); 17,135/52 ns and
+13,838/49 ns (P^5 at 32 bits, ratio 0.808); and 40,434/656 ns and 38,401/691
+ns (P^5 at 256 bits, ratio 0.950). The second process run had a noisy P²
+native/adapter median ratio of 1.010, but the 734 ns difference was below the
+combined within-run MAD of 9,964 ns. The aggregate table has no per-case median
+regressions against either baseline. The original
+`baseline_results.csv` remains the pre-optimization reference.

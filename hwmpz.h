@@ -181,6 +181,14 @@ static inline mpz_t *mpz_matrix_mult_fft (mpz_t *C, mpz_t *A, mpz_t *B, int d, m
 // Fourier dispatch reuses one transform per input entry across all products.
 mpz_t *mpz_rmatrix_mult_p2 (mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t w);
 
+// Computes C=A*B in Z[P]/(P^n), with coefficient-major row-major planes.
+// n must be positive, C cannot overlap A or B, and the matrix shape matches
+// mpz_rmatrix_mult. n=1 follows its integer dispatch (classical for d=1);
+// n=2 uses the P^2 path.
+// For n>2, Fourier dispatch reuses one transform per input entry.
+mpz_t *mpz_rmatrix_mult_pn (mpz_t *C, mpz_t *A, int r, mpz_t *B,
+                            int d, int n, mpz_t w);
+
 // computes C=AB mod m, where A and C are r-by-d matrices and B, is a d-by-d matrices, using naive rd^2 alg, w is a work variable (helps to avoid reallocs during computation)
 // ALIASING NOT ALLOWED
 static inline void mpz_rmatrix_mult_mod_naive (mpz_t *C, mpz_t *A, int r, mpz_t *B, int d, mpz_t m, mpz_t w)

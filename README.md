@@ -30,10 +30,11 @@ documented in `tests/fixtures/aws/README.md`.
 > merging into upstream rforest. Update or remove this README section at the
 > same time.
 
-The P² ring matrix API and its native product tests are active on this branch.
-`make test` reports the remaining P^n, bivariate, and ring forest suites as
-disabled until those APIs land. Their planned layouts, activation points,
-test milestones, and benchmark methodology are documented in
-`tests/ring_api_proposal.md` and `tests/fixtures/aws_ring/README.md`. Run
-`make bench-ring` to print per-case comparisons against the scalar ring
-adapter and integer block embedding baselines.
+The P² and arbitrary univariate P^n matrix multiplication APIs are active in
+`make test`, including their exact GMP references and deterministic Fourier
+reuse checks. Bivariate matrix multiplication and ring forests remain staged
+for later PRs. Their layouts, test milestones, and benchmark methodology are
+documented in `tests/ring_api_proposal.md` and
+`tests/fixtures/aws_ring/README.md`. Run `make bench-ring` to print per-case
+comparisons against the scalar ring adapter and integer block embedding
+baselines.

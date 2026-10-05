@@ -61,15 +61,15 @@ selects the same classical fallback behavior as the integer matrix API.
 
 ## Test milestones
 
-`make test` keeps the hyperelliptic forest suite enabled and runs the P²
-matmul tests on this branch. The remaining guarded C/GMP test bodies are
+`make test` keeps the hyperelliptic forest suite enabled and runs the P² and
+P^n matmul tests on this branch. The remaining guarded C/GMP test bodies are
 activated as their APIs land:
 
 1. The P² matmul tests check the exact P7 source products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
-2. PR 4 adds P^n cases for `n=1`, `2`, `3`, and `5`, each checked by an
+2. P^n cases for `n=1`, `2`, `3`, and `5` are each checked by an
    independent direct coefficient-ring GMP product.
 3. PR 5 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
    the highest corner and separately exercises overflow in P and Q, which
@@ -82,6 +82,6 @@ activated as their APIs land:
    hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and bivariate expected values
    come from direct GMP loops rather than a production backend.
 
-P² ring matrix multiplication is implemented on this branch. The P^n,
-bivariate, and ring forest APIs have not landed yet, so their guarded bodies
-remain uncompiled and `make test` reports their disabled state.
+P² and P^n ring matrix multiplication are implemented on this branch, and
+their tests run. Bivariate and ring forest APIs have not landed yet, so their
+guarded bodies remain uncompiled and `make test` reports their disabled state.
