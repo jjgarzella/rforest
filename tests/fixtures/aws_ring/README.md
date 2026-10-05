@@ -1,4 +1,8 @@
-# AWS P² products and ring baselines
+# Captured P² products and ring baselines
+
+> **Upstream cleanup required:** This fork-specific source reproduction guide
+> and its recorded benchmark results must be rewritten for upstream or removed
+> before merging into upstream rforest.
 
 `p2_aws_products.txt` records exact P² matrix multiplication triples from the
 existing AWS-2026 Sage implementation. The capture script uses
@@ -50,7 +54,7 @@ make clean bench_ring_baselines
 ```
 
 `baseline_results.csv` is the recorded initial run. The grid has 115 fixed
-cases: the three captured AWS P² products; synthetic P² cases at dimensions 2
+cases: the three captured Sage P² products; synthetic P² cases at dimensions 2
 and 8; P^n with `n=1,3,5` at dimensions 2 and 6; and bivariate boxes with
 `N=1,2,3` at dimensions 2 and 4. Synthetic cases include one-row and
 multirow inputs, 32/64/256/512-bit signed operands, and both dense and sparse
@@ -66,10 +70,10 @@ and algorithm work arrays. The adapter run includes every integer matrix call
 and GMP accumulation; the block run also includes embedding assembly and
 coefficient extraction. Inputs are generated once and held fixed. Before
 timing, both are checked coefficient by coefficient against a separate direct
-GMP matrix-coefficient reference; AWS rows are additionally checked against
-the captured Sage result. Each case has two warmups and nine timed
-repetitions. CSV times are per-case medians and median absolute deviations in
-nanoseconds; `adapter_over_block` is adapter median divided by block median,
+GMP matrix-coefficient reference; the direct GMP result is additionally
+checked against the stored Sage products for those three cases. Each case has
+two warmups and nine timed repetitions. CSV times are per-case medians and
+median absolute deviations in nanoseconds; `adapter_over_block` is adapter median divided by block median,
 so values below 1 indicate the adapter was faster.
 
 The recorded run was made with GCC 13.3.0, GMP 6.3.0, Linux 6.12.76-linuxkit
