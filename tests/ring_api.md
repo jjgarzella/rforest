@@ -1,9 +1,10 @@
-# Ring matrix and forest API proposal
+# Ring matrix and forest API
 
-> **Temporary PR-stack document:** Rewrite this proposal as final upstream API
-> documentation or remove it before merging the work into upstream rforest.
+> **Upstream cleanup required:** Reconcile this PR-stack API documentation
+> with the final upstream documentation or remove it before merging into
+> upstream rforest.
 
-This proposal keeps the existing `mpz_rmatrix_mult` and `rforest` interfaces
+These APIs keep the existing `mpz_rmatrix_mult` and `rforest` interfaces
 unchanged. Ring coefficients are exact GMP integers; a ring product is not
 reduced modulo an integer unless a forest endpoint requests a modulus.
 
@@ -22,7 +23,7 @@ The bivariate truncation is a box. A product term is dropped if either output
 exponent is at least `N`; in particular `P^(N-1)Q^(N-1)` is retained. `n=1`
 and `N=1` each reduce to ordinary integer matrix multiplication.
 
-## Proposed facades
+## Facades
 
 ```c
 void mpz_rmatrix_mult_p2(mpz_t *C, mpz_t *A, int rows,
@@ -59,33 +60,33 @@ separate work array before copying back; ring-specific in-place wrappers can
 follow that pattern if a later caller needs them. The `hw_disable_fft` switch
 selects the same classical fallback behavior as the integer matrix API.
 
-## Test milestones
+## Enabled tests
 
-`make test` keeps the hyperelliptic forest suite enabled and runs the P², P^n,
-and bivariate matmul tests on this branch. The remaining guarded C/GMP test
-bodies are activated as their APIs land:
+`make test` runs the hyperelliptic forest suite and all ring tests:
 
-1. The P² matmul tests check the exact P7 source products in
+1. P² matmul tests check the exact captured Sage products in
    `tests/fixtures/aws_ring/p2_aws_products.txt`, signed/dense/sparse/zero and
    large operands, noncommuting order, cancellation, rectangular shape, and
    nonaliasing output semantics.
-2. P^n cases for `n=1`, `2`, `3`, and `5` are each checked by an
+2. P^n matmul tests cover `n=1`, `2`, `3`, and `5`, each checked by an
    independent direct coefficient-ring GMP product.
-3. PR 5 adds bivariate `N=1`, `2`, and `3` cases. The `N=3` fixture retains
-   the highest corner and separately exercises overflow in P and Q, which
-   distinguishes box truncation from total-degree truncation.
-4. PR 6 enables forest comparisons against a direct sequential coefficient
-   ring reference, with the transition polynomial `x` kept separate from P/Q,
-   rectangular initial `V`, exclusive endpoints, three `kappa` values,
-   coefficientwise residues, final `z`, final `V`, and immutable inputs. P²
-   also gets block-embedding equivalence cases based on the captured
-   hyperelliptic forest fixtures in `tests/fixtures/aws/`. General P^n and
-   bivariate expected values come from direct GMP loops rather than a
-   production backend.
+3. Bivariate matmul tests cover `N=1`, `2`, and `3`. The `N=3` case retains the
+   highest corner and separately exercises overflow in P and Q, distinguishing
+   box truncation from total-degree truncation.
+4. Forest comparisons use a direct sequential coefficient-ring reference, with
+   the transition polynomial `x` kept separate from P/Q, rectangular initial
+   `V`, exclusive endpoints, three `kappa` values, coefficientwise residues,
+   final `z`, final `V`, and immutable inputs. P² also gets block-embedding
+   equivalence cases, and the fixture runner converts each captured AWS-derived
+   hyperelliptic forest block fixture in `tests/fixtures/aws/` to P² and
+   compares every full output matrix and final state. General P^n and bivariate
+   expected values come from direct GMP loops rather than a production backend.
+   All families are repeated with
+   `hw_disable_fft` to exercise the classical paths.
 
 The P², P^n, and bivariate multiplication facades and their constructed exact
-references are enabled together on this branch. The test also checks
-that each coefficient entry is transformed once, every truncated Fourier-side
-matrix product is counted, each output is reconstructed once, aliased input
-pointers remain valid, and `hw_disable_fft` takes the exact classical path.
-Forest tests remain disabled until the final forest integration stage.
+references check that each coefficient entry is transformed once, every
+truncated Fourier-side matrix product is counted, each output is reconstructed
+once, and `hw_disable_fft` takes the exact classical path. Forest tests check
+the public facades against independent exact references and the P² regular
+representation.

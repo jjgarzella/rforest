@@ -208,3 +208,29 @@ baselines: native/adapter ratios range from 0.270 to 0.998 and native/block
 ratios from 0.084 to 0.646. The accepted stage-3 result remains in
 `pn_optimized_results.csv`; the three-process stage-4 stack check is recorded
 separately in `pn_stack_check_results.csv`.
+
+## Forest integration stack checks
+
+Stage 5 re-ran the univariate acceptance grid in five independent processes
+and the bivariate grid in three. Run each grid with `--pn-optimized` or
+`--pnq-optimized`, then aggregate with `aggregate_pn_benchmarks.py` as above.
+The five-process univariate report is in `pn_stack_check_pr5_results.csv`;
+the three-process bivariate report is in `pnq_stack_check_pr5_results.csv`.
+All 48 bivariate medians beat both baselines (native/adapter 0.378–0.985,
+native/block 0.042–0.607). The 67 univariate cases all beat the block
+baseline (native/block 0.083–0.626). Two univariate point medians are above
+the adapter: dense P² 8x8 at 512 bits (1.005) and dense P^5 1x6 at 256 bits
+(1.036). Their absolute gaps are 1,107 ns and 1,312 ns, below their combined
+adapter/native MADs of 31,061 ns and 3,035 ns; neither is a measurable
+slowdown.
+
+The end-to-end P² comparison can be reproduced with `make bench-ring-forest`.
+It first checks every output and final state against both the integer block
+forest and a sequential direct coefficientwise ring adapter, then reports
+nine timing samples for a fixed 64-endpoint, dimension-4 workload. The
+recorded medians are 2.940 ms for the P² product-tree forest, 3.414 ms for
+the integer block forest, and 0.355 ms for the direct adapter; the
+corresponding MADs are 0.155 ms, 0.129 ms, and 0.013 ms. The intervals in
+this constructed case each contain one transition, so the sequential adapter
+avoids product tree overhead. These are review measurements only. The CSV is
+preserved in `p2_forest_pr5_results.csv`; no test asserts a timing threshold.
