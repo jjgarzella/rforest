@@ -1,6 +1,8 @@
 #ifndef _INCLUDE_RFOREST_
 #define _INCLUDE_RFOREST_
 
+#include "zzmem.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +33,16 @@ void rforest (mpz_t *A,   // array of size rows*dim*n (outputs)
               long n,     // number of moduli and rows*dim outputs
               mpz_t z,    // integer divisible by product of the moduli
               int kappa); // log_2 of number of trees in the forest
+
+// As rforest(), but reuse freed ZZ FFT allocations owned by workspace across
+// this forest call and later calls made with the same workspace. The caller
+// owns the workspace and must destroy it after all such calls have returned.
+// This preserves rforest's existing concurrency/reentrancy limits: the global
+// FFT modulus setup is not safe for concurrent or nested forest calls.
+void rforest_with_workspace (zz_workspace_t *workspace,
+                             mpz_t *A, mpz_t *V, int rows, mpz_t *M,
+                             int deg, int dim, mpz_t *m, long kbase,
+                             long *k, long n, mpz_t z, int kappa);
 
 // computes z = prod_i=0^(n-1) m[i] using a product tree
 void mproduct (mpz_t z, mpz_t *m, long n);

@@ -497,7 +497,8 @@ static int tree_height(long n, int kappa)
 }
 
 static void check_fixture(const char *path, const fixture *data, int kappa,
-                          int disable_fft, int enforce_fft_expectation)
+                          int disable_fft, int enforce_fft_expectation,
+                          int use_workspace)
 {
     mpz_t *matrix_snapshot = copy_mpz_array(data->matrix, data->coefficient_cells);
     mpz_t *moduli_snapshot = copy_mpz_array(data->moduli, (size_t)data->n);
@@ -510,6 +511,13 @@ static void check_fixture(const char *path, const fixture *data, int kappa,
     int repeat;
     unsigned long fft_calls_per_run = 0;
     int previous_hw_disable_fft = hw_disable_fft;
+    zz_workspace_t *workspace = use_workspace
+        ? zz_workspace_create(ZZ_WORKSPACE_DEFAULT_LIMIT) : NULL;
+
+    if (use_workspace && !workspace) {
+        fputs("fixture runner: out of memory creating ZZ workspace\n", stderr);
+        exit(EXIT_FAILURE);
+    }
 
     if (!endpoints_snapshot) {
         fprintf(stderr, "fixture runner: out of memory copying endpoints\n");
@@ -537,9 +545,17 @@ static void check_fixture(const char *path, const fixture *data, int kappa,
         unsigned long fft_calls;
 
         mpz_init_set(working_z, data->initial_z);
-        rforest(outputs, working_v, data->rows, data->matrix, data->deg, data->dim,
-                data->moduli, data->kbase, data->endpoints, data->n,
-                working_z, kappa);
+        if (workspace) {
+            zz_workspace_reset_stats(workspace);
+            rforest_with_workspace(workspace, outputs, working_v, data->rows,
+                                   data->matrix, data->deg, data->dim,
+                                   data->moduli, data->kbase, data->endpoints,
+                                   data->n, working_z, kappa);
+        } else {
+            rforest(outputs, working_v, data->rows, data->matrix, data->deg,
+                    data->dim, data->moduli, data->kbase, data->endpoints,
+                    data->n, working_z, kappa);
+        }
         fft_calls = fft_matrix_multiply_calls - fft_calls_before;
 
         if (repeat == 0)
@@ -561,6 +577,22 @@ static void check_fixture(const char *path, const fixture *data, int kappa,
                     "%s (%s): hw_disable_fft set but observed %lu matrix FFT multiplies\n",
                     path, data->case_name, fft_calls);
             exit(EXIT_FAILURE);
+        }
+        if (workspace) {
+            zz_workspace_stats_t stats;
+            zz_workspace_get_stats(workspace, &stats);
+            if (stats.live_bytes != 0) {
+                fprintf(stderr, "%s (%s): workspace retained live bytes after rforest\n",
+                        path, data->case_name);
+                exit(EXIT_FAILURE);
+            }
+            if (enforce_fft_expectation && data->expect_fft_matrix_mul &&
+                fft_calls > 0 && stats.cache_hits == 0) {
+                fprintf(stderr,
+                        "%s (%s): FFT-dispatched workspace run recorded no cache reuse\n",
+                        path, data->case_name);
+                exit(EXIT_FAILURE);
+            }
         }
 
         for (i = 0; i < (size_t)data->n; i++) {
@@ -623,10 +655,33 @@ static void check_fixture(const char *path, const fixture *data, int kappa,
     clear_mpz_array(moduli_snapshot, (size_t)data->n);
     free(endpoints_snapshot);
 
-    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d, kappa=%d, tree height=%d, repeats=%d, FFT matrix multiplies/run=%lu%s\n",
+    if (workspace) {
+        zz_workspace_stats_t stats;
+        zz_workspace_get_stats(workspace, &stats);
+        if (stats.live_bytes != 0) {
+            fprintf(stderr, "%s (%s): workspace still has live bytes before destroy\n",
+                    path, data->case_name);
+            exit(EXIT_FAILURE);
+        }
+        if (enforce_fft_expectation && data->expect_fft_matrix_mul &&
+            !disable_fft && stats.retained_bytes == 0) {
+            fprintf(stderr, "%s (%s): FFT workspace retained no reusable storage\n",
+                    path, data->case_name);
+            exit(EXIT_FAILURE);
+        }
+        if (zz_workspace_trim(workspace, 0) != 0) {
+            fprintf(stderr, "%s (%s): workspace trim did not release retained storage\n",
+                    path, data->case_name);
+            exit(EXIT_FAILURE);
+        }
+        zz_workspace_destroy(workspace);
+    }
+
+    printf("PASS %s (%s, %s): %ld matrices, dim=%d rows=%d, kappa=%d, tree height=%d, repeats=%d, FFT matrix multiplies/run=%lu%s%s\n",
            path, data->case_name, data->call_name, data->n, data->dim, data->rows,
            kappa, tree_height(data->n, kappa), FIXTURE_REPEAT_RUNS,
-           fft_calls_per_run, disable_fft ? " (FFT disabled)" : "");
+           fft_calls_per_run, disable_fft ? " (FFT disabled)" : "",
+           use_workspace ? " (workspace)" : "");
 }
 
 static int parse_kappa(const char *text)
@@ -648,6 +703,7 @@ int main(int argc, char **argv)
     int arg;
     int have_fixture = 0;
     int disable_fft = 0;
+    int use_workspace = 0;
     int kappa_override_set = 0;
     int kappa_override = 0;
     int fixture_count = 0;
@@ -655,6 +711,8 @@ int main(int argc, char **argv)
     for (arg = 1; arg < argc; arg++) {
         if (strcmp(argv[arg], "--disable-fft") == 0) {
             disable_fft = 1;
+        } else if (strcmp(argv[arg], "--workspace") == 0) {
+            use_workspace = 1;
         } else if (strcmp(argv[arg], "--kappa") == 0) {
             if (++arg >= argc) {
                 fprintf(stderr, "fixture runner: --kappa requires a value\n");
@@ -675,7 +733,7 @@ int main(int argc, char **argv)
     }
 
     if (!have_fixture) {
-        fprintf(stderr, "usage: %s [--disable-fft] [--kappa K] fixture.rf [fixture.rf ...]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--disable-fft] [--workspace] [--kappa K] fixture.rf [fixture.rf ...]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -684,6 +742,8 @@ int main(int argc, char **argv)
         int kappa;
         if (strcmp(argv[arg], "--disable-fft") == 0)
             continue;
+        if (strcmp(argv[arg], "--workspace") == 0)
+            continue;
         if (strcmp(argv[arg], "--kappa") == 0) {
             arg++;
             continue;
@@ -691,7 +751,7 @@ int main(int argc, char **argv)
         fixture_read(argv[arg], &data);
         kappa = kappa_override_set ? kappa_override : data.kappa;
         check_fixture(argv[arg], &data, kappa, disable_fft,
-                      !disable_fft && !kappa_override_set);
+                      !disable_fft && !kappa_override_set, use_workspace);
         fixture_clear(&data);
         fixture_count++;
     }

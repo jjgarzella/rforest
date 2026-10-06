@@ -6,16 +6,26 @@
 
 #define _max(a,b) ((a)>(b)?(a):(b))
 
-void rforest (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim, mpz_t *m, long kbase, long *ks, long n, mpz_t z, int kappa)
+static void rforest_impl (zz_workspace_t *workspace, mpz_t *A, mpz_t *V,
+                          int rows, mpz_t *M, int deg, int dim, mpz_t *m,
+                          long kbase, long *ks, long n, mpz_t z, int kappa)
 {
     assert ( A && V && rows > 0 && M && deg >= 0 && dim > 0 && m && ks && n >= 0 && kappa >= 0 );
     if ( !n ) return;
+
+    // Keep long-lived modulus roots outside either workspace. Suspend any
+    // caller binding during setup, then bind only around forest scratch.
+    zz_workspace_t *previous_workspace = NULL;
+    if (workspace)
+        previous_workspace = zz_workspace_bind(NULL);
 
     int ell = _ui_len(n) - kappa; // we will use <= 2^kappa trees of height ell.
     if ( ell < 0 ) ell = 0;
 
     hw_mem_init(0);
     hw_mpz_setup();
+    if (workspace)
+        zz_workspace_bind(workspace);
 
     // working space
     mpz_t *w = mpz_vec_alloc_and_init2 (_max(deg,rows*dim)+1, mpz_bits(z));
@@ -80,11 +90,32 @@ void rforest (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim, mpz_t *m
     }
 
     mpz_vec_clear_and_free (w, _max(deg,rows*dim)+1);
+    if (workspace)
+        zz_workspace_restore(NULL);
     hw_mpz_clear();
     hw_mem_clear();
+    if (workspace)
+        zz_workspace_restore(previous_workspace);
 
     // for consistency reduce V = V mod z before returning (note mpz_rmatrix_mod does a soft reduction)
     mpz_vec_mod_naive (V, V, rows*dim, z);
+}
+
+
+void rforest (mpz_t *A, mpz_t *V, int rows, mpz_t *M, int deg, int dim,
+              mpz_t *m, long kbase, long *ks, long n, mpz_t z, int kappa)
+{
+    rforest_impl(NULL, A, V, rows, M, deg, dim, m, kbase, ks, n, z, kappa);
+}
+
+
+void rforest_with_workspace (zz_workspace_t *workspace, mpz_t *A, mpz_t *V,
+                             int rows, mpz_t *M, int deg, int dim, mpz_t *m,
+                             long kbase, long *ks, long n, mpz_t z, int kappa)
+{
+    assert(workspace);
+    rforest_impl(workspace, A, V, rows, M, deg, dim, m, kbase, ks, n, z,
+                 kappa);
 }
 
 
