@@ -13,7 +13,7 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
-TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled
+TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled test_zz_workspace
 BENCH_PROGRAMS = bench_ring_baselines
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
@@ -57,6 +57,9 @@ test_ring_matmul_disabled: tests/test_ring_matmul_disabled.o librforest.a
 test_ring_forest_disabled: tests/test_ring_forest_disabled.o librforest.a
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
+test_zz_workspace: tests/test_zz_workspace.o librforest.a rforest.h
+	$(CC) $(LDFLAGS) -pthread -o $@ $< librforest.a $(LIBS)
+
 bench_ring_baselines: tests/bench_ring_baselines.o librforest.a hwmpz.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
@@ -76,13 +79,18 @@ tests/test_ring_matmul_disabled.o: tests/test_ring_matmul_disabled.c
 tests/test_ring_forest_disabled.o: tests/test_ring_forest_disabled.c
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
-test: test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled
+tests/test_zz_workspace.o: tests/test_zz_workspace.c rforest.h zzmem.h
+	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
+
+test: test_hyperelliptic_fixtures test_ring_matmul_disabled test_ring_forest_disabled test_zz_workspace
 	./test_hyperelliptic_fixtures $(FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 0 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 4 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --disable-fft $(FIXTURES)
+	./test_hyperelliptic_fixtures --workspace $(FIXTURES)
 	./test_ring_matmul_disabled
 	./test_ring_forest_disabled
+	./test_zz_workspace
 
 check: test
 
