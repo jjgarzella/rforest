@@ -238,19 +238,62 @@ static inline long mpz_row_bits (mpz_t *A, int d)
 static inline long mpz_matrix_bits (mpz_t *A, int d) { return mpz_row_bits (A, d*d); }
 
 // only reduces if it seems worthwhile
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+enum {
+    RFOREST_TEST_SOFT_MOD_SKIP = 1,
+    RFOREST_TEST_SOFT_MOD_GMP = 2,
+    RFOREST_TEST_SOFT_MOD_FFT = 3,
+    RFOREST_TEST_SOFT_MOD_FFT_DISABLED = 4
+};
+extern int rforest_test_soft_transfer_active;
+void rforest_test_soft_transfer_dispatch(int path, mpz_t *A, mpz_t *B,
+                                         long n, mpz_t m);
+void rforest_test_soft_subtree_boundary(long start, mpz_t *incoming,
+                                        mpz_t *reduced, long n, mpz_t m);
+#endif
+
 static inline void mpz_vec_mod (mpz_t *A, mpz_t *B, long n, mpz_t m)
 {
     int i;
     long max, tot, s;
 
     for ( i = 0,  tot = 0, max = 0 ; i < n ; i++ ) { s = mpz_size (B[i]); if ( s > max ) max = s;  tot += s; }
-    if ( 8*max <= 9*mpz_size(m) ) { mpz_vec_set (A, B, n); return ; }   // don't reduce rows whose entries are not much bigger than the modulus
-    if ( n == 1 ) { mpz_fdiv_r (A[0], B[0], m); return; }
+    if ( 8*max <= 9*mpz_size(m) ) {
+        mpz_vec_set (A, B, n);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+        if (rforest_test_soft_transfer_active)
+            rforest_test_soft_transfer_dispatch(
+                RFOREST_TEST_SOFT_MOD_SKIP, A, B, n, m);
+#endif
+        return;
+    }   // don't reduce rows whose entries are not much bigger than the modulus
+    if ( n == 1 ) {
+        mpz_fdiv_r (A[0], B[0], m);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+        if (rforest_test_soft_transfer_active)
+            rforest_test_soft_transfer_dispatch(
+                RFOREST_TEST_SOFT_MOD_GMP, A, B, n, m);
+#endif
+        return;
+    }
     s = mpz_mod_fft_crossover(n);
     if ( ! hw_disable_fft && tot > n*s && mpz_size(m) > s ) {
         mpz_vec_mod_fft (A, B, n, m);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+        if (rforest_test_soft_transfer_active)
+            rforest_test_soft_transfer_dispatch(
+                RFOREST_TEST_SOFT_MOD_FFT, A, B, n, m);
+#endif
     } else {
         mpz_vec_mod_naive (A, B, n, m);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+        if (rforest_test_soft_transfer_active) {
+            int path = hw_disable_fft && tot > n*s && mpz_size(m) > s
+                ? RFOREST_TEST_SOFT_MOD_FFT_DISABLED
+                : RFOREST_TEST_SOFT_MOD_GMP;
+            rforest_test_soft_transfer_dispatch(path, A, B, n, m);
+        }
+#endif
     }
 }
 

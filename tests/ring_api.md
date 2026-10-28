@@ -54,6 +54,13 @@ as in `rforest`; each output plane is reduced coefficient by coefficient
 modulo `m[i]`. On return, `z` has each consumed modulus divided out and `V` is
 the complete product modulo the residual `z`.
 
+All three ring forest families share the soft transfer reduction used between
+subtrees. It may retain signed or noncanonical representatives there; the next
+subtree hard-reduces its input, and endpoint outputs and the final public `V`
+remain canonically reduced. The transfer modulus is divisible by every
+remaining endpoint modulus, so the exact endpoint and final-state results are
+unchanged.
+
 The multiplication facades preserve the base API's shape and aliasing
 contract: `C` must not overlap either input. Existing in-place calls use a
 separate work array before copying back; ring-specific in-place wrappers can
@@ -83,6 +90,12 @@ selects the same classical fallback behavior as the integer matrix API.
    expected values come from direct GMP loops rather than a production backend.
    All families are repeated with
    `hw_disable_fft` to exercise the classical paths.
+5. `test_ring_forest_soft` uses a test-only dispatcher observer to exercise an
+   actual skipped transfer reduction with a negative noncanonical value carried
+   into the next subtree, then checks its hard reduction. It also requires the
+   GMP, FFT, and FFT-disabled fallback branches on large P², P^n, and bivariate
+   operands, with exact sequential outputs, canonical final state, and
+   immutable matrix/modulus/endpoint inputs.
 
 The P², P^n, and bivariate multiplication facades and their constructed exact
 references check that each coefficient entry is transformed once, every

@@ -51,6 +51,12 @@ are exclusive. On return, `z` has the consumed moduli divided out and `V` is
 the complete product modulo the remaining `z`; `M`, `m`, and `k` are
 unchanged. Caller arrays must not overlap one another.
 
+The P², Pⁿ, and Pⁿ/Qⁿ forest facades share the existing soft reduction policy
+when transferring `V` between subtrees. That transfer may carry signed or
+noncanonical representatives; the next subtree hard-reduces its input, and
+endpoint outputs and the final public `V` keep their existing canonical hard
+reductions. This changes no exact endpoint or final-state value.
+
 The caller allocates and initializes `M`, `V`, `A`, `m`, and `k`; the forest
 allocates and frees its internal product and remainder trees. These APIs cover
 the three fixed rings above with GMP integer coefficients. They do not expose
@@ -64,7 +70,11 @@ initial `V`, multiple kappa regimes and repeated runs, and repeats those
 checks with `hw_disable_fft`. The fixture runner also converts each captured
 AWS block matrix `[[M0,M1],[0,M0]]` to P², runs both forest implementations,
 and compares every full output matrix and final state against the captured AWS
-results. Fixture provenance is in `tests/fixtures/aws/README.md`; ring layouts,
+results. `test_ring_forest_soft` additionally observes the shared transfer
+dispatcher in a test-only build, including negative skipped representatives,
+the next-subtree hard reduction, GMP and FFT reductions, and the disabled-FFT
+fallback for P², Pⁿ, and Pⁿ/Qⁿ. Fixture provenance is in
+`tests/fixtures/aws/README.md`; ring layouts,
 matrix multiplication references and benchmark grids are described in
 `tests/ring_api.md` and `tests/fixtures/aws_ring/README.md`.
 
