@@ -418,6 +418,12 @@ static void rforest_ring(mpz_t *A, mpz_t *V, int rows, mpz_t *M,
             ring_tree_build(Mtree, ell, dim, &shape, work[0]);
             ring_tree_reduce_rows(Rtree, V, Mtree, mtree, ell, dim, rows,
                                   &shape, work);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+            if (start > 0)
+                rforest_test_soft_subtree_boundary(
+                    start, V, Rtree[0],
+                    ring_checked_long(shape.vector_cells), mtree[0][0]);
+#endif
 
             for (long i = start ? start : 1; i < stop && i <= n; i++) {
                 size_t output_offset = (size_t)(i - 1) * shape.vector_cells;
@@ -431,8 +437,16 @@ static void rforest_ring(mpz_t *A, mpz_t *V, int rows, mpz_t *M,
             mpz_divexact(z, z, mtree[0][0]);
             ring_matrix_multiply(&shape, next_v, V, rows, Mtree[0], dim,
                                  work[0]);
-            mpz_vec_mod_naive(V, next_v,
-                              ring_checked_long(shape.vector_cells), z);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+            rforest_test_soft_transfer_active = 1;
+#endif
+            /* The remaining endpoint moduli divide z; the next subtree and
+               public return path still perform their existing hard reductions. */
+            mpz_vec_mod(V, next_v,
+                        ring_checked_long(shape.vector_cells), z);
+#ifdef RFOREST_TEST_SOFT_TRANSFER_DISPATCH
+            rforest_test_soft_transfer_active = 0;
+#endif
         }
 
         mpz_vec_clear_and_free(W0, ring_checked_long(shape.matrix_cells));

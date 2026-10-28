@@ -13,7 +13,7 @@ RFORESTOBJECTS = hwmpz.o hwmpz_tune.o hwmem.o rtree.o rforest.o
 HEADERS = $(MPZFFTHEADERS) $(RFORESTHEADERS)
 OBJECTS = $(MPZFFTOBJECTS) $(RFORESTOBJECTS)
 PROGRAMS = test_rforest
-TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul test_ring_forest
+TEST_PROGRAMS = test_hyperelliptic_fixtures test_ring_matmul test_ring_forest test_ring_forest_soft
 BENCH_PROGRAMS = bench_ring_baselines bench_ring_forest
 FIXTURE_LDFLAGS ?= -Wl,--wrap=mpz_rmatrix_mult_fft
 FIXTURES = $(sort $(wildcard tests/fixtures/aws/*.rf))
@@ -57,6 +57,9 @@ test_ring_matmul: tests/test_ring_matmul.o librforest.a
 test_ring_forest: tests/test_ring_forest.o librforest.a
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
+test_ring_forest_soft: tests/test_ring_forest_soft.o tests/rforest_soft_dispatch.o librforest.a
+	$(CC) $(LDFLAGS) -o $@ tests/test_ring_forest_soft.o tests/rforest_soft_dispatch.o librforest.a $(LIBS)
+
 bench_ring_baselines: tests/bench_ring_baselines.o librforest.a hwmpz.h
 	$(CC) $(LDFLAGS) -o $@ $< librforest.a $(LIBS)
 
@@ -88,13 +91,20 @@ tests/test_ring_matmul.o: tests/test_ring_matmul.c
 tests/test_ring_forest.o: tests/test_ring_forest.c rforest.h
 	$(CC) $(CFLAGS) $(INCLUDES) -I. -o $@ -c $<
 
-test: test_hyperelliptic_fixtures test_ring_matmul test_ring_forest
+tests/test_ring_forest_soft.o: tests/test_ring_forest.c rforest.h hwmpz.h
+	$(CC) $(CFLAGS) -DRFOREST_TEST_SOFT_TRANSFER_DISPATCH $(INCLUDES) -I. -o $@ -c $<
+
+tests/rforest_soft_dispatch.o: rforest.c rforest.h hwmpz.h
+	$(CC) $(CFLAGS) -DRFOREST_TEST_SOFT_TRANSFER_DISPATCH $(INCLUDES) -I. -o $@ -c $<
+
+test: test_hyperelliptic_fixtures test_ring_matmul test_ring_forest test_ring_forest_soft
 	./test_hyperelliptic_fixtures $(FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 0 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --kappa 4 $(KAPPA_FIXTURES)
 	./test_hyperelliptic_fixtures --disable-fft $(FIXTURES)
 	./test_ring_matmul
 	./test_ring_forest
+	./test_ring_forest_soft
 
 check: test
 
